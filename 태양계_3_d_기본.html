@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Solar System Simulation (Events + Ships + Gravity)</title>
+<style>
+  body, html { margin: 0; padding: 0; overflow: hidden; background: black; color: white; font-family: sans-serif; height: 100vh; width: 100vw; }
+  #canvas { display: block; }
+  #controls {
+    position: fixed; bottom: 10px; left: 10px; background: rgba(30,30,30,0.7);
+    padding: 10px; border-radius: 10px; user-select: none; font-size: 14px;
+    display: inline-flex; flex-direction: column; gap: 8px; backdrop-filter: blur(4px);
+  }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; }
+  .btn { background: #2e2e2e; color: #fff; border: 1px solid #444; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+  .btn:hover { background: #3a3a3a; }
+  .btn.active { background: #1976d2; border-color: #1976d2; }
+  input[type="number"] { width: 80px; background: #171717; color: #fff; border: 1px solid #444; padding: 4px 6px; border-radius: 6px; }
+  input[type="range"] { width: 260px; }
+  label { color: #ddd; }
+  .hint { opacity: .8; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<div id="controls">
+  <div class="row">
+    <label for="timeScale">Time Scale:</label>
+    <input type="range" id="timeScale" min="0.1" max="50" step="0.1" value="5" />
+    <input type="number" id="timeScaleNum" min="0.1" max="50" step="0.1" value="5" />
+    <span id="timeScaleValue">×5.0</span>
+  </div>
+
+  <div class="row presets" id="presetRow">
+    <button class="btn preset" data-scale="1">×1.0</button>
+    <button class="btn preset" data-scale="2">×2.0</button>
+    <button class="btn preset" data-scale="3">×3.0</button>
+    <button class="btn preset" data-scale="4">×4.0</button>
+    <button class="btn preset" data-scale="5">×5.0</button>
+  </div>
+
+  <div class="row">
+    <label><input type="checkbox" id="showRotation" checked /> Show Rotation</label>
+  </div>
+
+  <!-- 이벤트 툴 -->
+  <div class="row">
+    <span>Tool:</span>
+    <button class="btn tool" data-tool="none">None</button>
+    <button class="btn tool" data-tool="asteroid">Asteroids</button>
+    <button class="btn tool" data-tool="field">Force Field</button>
+    <button class="btn" id="clearAll">Clear</button>
+  </div>
+  <div class="row hint" id="toolHint">드래그로 배치</div>
+
+  <div class="row" style="margin-top:6px;">
+    <button class="btn" id="spawnShipBtn">우주선 소환 (클릭 위치도 가능)</button>
+    <label class="hint">클릭으로도 우주선 소환됩니다</label>
+  </div>
+</div>
+
+<script>
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+
+  // View state
+  let zoom = 1;
+  let offset = { x: 0, y: 0 };
+  let dragging = false;
+  let lastPos = { x: 0, y: 0 };
+
+  // Time control
+  let timeScale = 5; // UI 배속
+  const BASE_SPEED = 86400 * 1; // 기본 1일/초
+  let simTime = 0;             // 시뮬레이션 누적 시간(초)
+  let lastTS = null;
+  let showRotation = true;
+
+  // Scale: AU -> pixels
+  const AU = 1.496e8;       // km
+  const SCALE = 150 / AU;   // 1 AU -> 150px
+
+  // Planets dataset (same as 원래)
+  const planets = [
+    { name: 'Mercury', r: 57.9e6,  period: 88,    rotationPeriod: 1407.6 * 60,      color: '#aaa',     inc: 7 },
+    { name: 'Venus',   r: 108.2e6, period: 225,   rotationPeriod: -5832.5 * 3600,   color: '#f5deb3',  inc: 3.4 },
+    { name: 'Earth',   r: 149.6e6, period: 365.25,rotationPeriod: 24 * 3600,        color: '#00aaff',  inc: 0, moons: [
+      { name: 'Moon', r: 0.384e6, period: 27.3, rotationPeriod: 27.3 * 24 * 3600, color: '#ccc' }
+    ] },
+    { name: 'Mars',    r: 227.9e6, period: 687,   rotationPeriod: 24.6 * 3600,      color: '#ff4500',  inc: 1.85, moons: [
+      { name: 'Phobos', r: 9376,   period: 0.32, rotationPeriod: 0.32 * 24 * 3600, color: '#999' },
+      { name: 'Deimos', r: 23463,  period: 1.26, rotationPeriod: 1.26 * 24 * 3600, color: '#bbb' }
+    ] },
+    { name: 'Jupiter', r: 778.5e6, period: 4331,  rotationPeriod: 9.9 * 3600,       color: '#ffcc66',  inc: 1.3, moons: [
+      { name: 'Io',       r: 421700,  period: 1.77, rotationPeriod: 1.77 * 24 * 3600, color: '#ffcc33' },
+      { name: 'Europa',   r: 671034,  period: 3.55, rotationPeriod: 3.55 * 24 * 3600, color: '#ccccff' },
+      { name: 'Ganymede', r: 1070412, period: 7.15, rotationPeriod: 7.15 * 24 * 3600, color: '#ddddcc' },
+      { name: 'Callisto', r: 1882709, period: 16.69, rotationPeriod: 16.69 * 24 * 3600, color: '#999966' }
+    ] },
+    { name: 'Saturn',  r: 1433.5e6,period: 10747, rotationPeriod: 10.7 * 3600,      color: '#ffcc99',  inc: 2.48, rings: true, moons: [
+      { name: 'Titan', r: 1221870, period: 15.9, rotationPeriod: 15.9 * 24 * 3600, color: '#ffbb66' }
+    ] },
+    { name: 'Uranus',  r: 2872.5e6,period: 30589, rotationPeriod: -17.2 * 3600,     color: '#66ccff',  inc: 0.77, moons: [
+      { name: 'Titania', r: 436300, period: 8.7, rotationPeriod: 8.7 * 24 * 3600, color: '#aaffff' },
+      { name: 'Oberon',  r: 583500, period: 13.5,rotationPeriod: 13.5 * 24 * 3600, color: '#99ccff' }
+    ] },
+    { name: 'Neptune', r: 4495.1e6,period: 59800, rotationPeriod: 16.1 * 3600,      color: '#3366ff',  inc: 1.77, moons: [
+      { name: 'Triton', r: 354800, period: 5.9, rotationPeriod: 5.9 * 24 * 3600, color: '#99aaff' }
+    ] }
+  ];
+
+  // ===== Additional simulation objects =====
+  const asteroids = []; // {x,y,vx,vy,r}
+  const fields = [];    // {x1,y1,x2,y2}
+  let toolMode = 'none';
+  let toolDragging = false;
+  let toolPath = [];
+
+  // Ships array: 클릭으로 생성되는 우주선
+  const ships = []; // {x,y,vx,vy,angle}
+
+  // Planet physical properties (mass, gravityRadius) 계산해서 추가
+  // mass는 근사치(반장축 또는 다른 값과 비례)로 잡고, gravityRadius는 픽셀 단위 영향 범위를 정의
+  const PLANET_MASS_SCALE = 1e5; // 튜닝용 상수 (시뮬레이션 단위 맞추기)
+  const GRAVITY_CONST = 2.0;     // 시각적으로 보이는 가속도를 위해 조정된 상수
+  const MIN_GRAVITY_RADIUS = 60; // 픽셀
+
+  planets.forEach(p => {
+    // 질량 근사: 반지름(반장축) 값에 스케일 곱함 — 단순화된 모델
+    p.mass = (p.r || 1) * PLANET_MASS_SCALE;
+    // 중력권 반지름: 궤도 반경의 일부 또는 최소값 보장
+    p.gravityRadius = Math.max(MIN_GRAVITY_RADIUS, (p.r * SCALE) * 0.18);
+    p.destroyed = false; // 파괴 여부
+  });
+
+  // 폭발(행성 파괴) 이펙트 리스트
+  const explosions = []; // {x,y,age,life,radiusMax}
+
+  // ===== Canvas resize =====
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ===== Utility: coordinate transforms =====
+  function screenToWorld(sx, sy) {
+    const x = (sx - canvas.width/2 - offset.x) / zoom;
+    const y = (sy - canvas.height/2 - offset.y) / zoom;
+    return { x, y };
+  }
+
+  // ===== Physics helpers =====
+  function segNormal(x1,y1,x2,y2) { const dx=x2-x1, dy=y2-y1, len=Math.hypot(dx,dy)||1; return { nx:-dy/len, ny:dx/len }; }
+  function pointSegDistance(px,py,x1,y1,x2,y2){ const dx=x2-x1, dy=y2-y1, l2=dx*dx+dy*dy||1e-6; let t=((px-x1)*dx+(py-y1)*dy)/l2; t=Math.max(0,Math.min(1,t)); const sx=x1+t*dx, sy=y1+t*dy; return { d:Math.hypot(px-sx,py-sy), sx, sy, t }; }
+
+  // 반사 벡터
+  function reflect(vx,vy,nx,ny){ const dot=vx*nx+vy*ny; return { vx:vx-2*dot*nx, vy:vy-2*dot*ny }; }
+
+  // ===== Spawn ship at world coords =====
+  function spawnShipAtWorld(x,y){
+    ships.push({ x, y, vx:0, vy:0, angle:0 });
+  }
+
+  // ===== Explosion helper =====
+  function spawnExplosion(x,y){ explosions.push({ x, y, age:0, life:1.6, radiusMax: 80 + Math.random()*120 }); }
+
+  // ===== Main draw/update =====
+  function draw(ts){
+    if (lastTS === null) lastTS = ts;
+    const dt = (ts - lastTS)/1000; // seconds
+    lastTS = ts;
+
+    // 시뮬레이션 시간 누적
+    simTime += dt * BASE_SPEED * timeScale;
+
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.save();
+    ctx.translate(canvas.width/2 + offset.x, canvas.height/2 + offset.y);
+    ctx.scale(zoom, zoom);
+
+    // Sun
+    ctx.beginPath(); ctx.fillStyle='yellow'; ctx.arc(0,0,10,0,Math.PI*2); ctx.fill();
+
+    // track Earth position
+    let earthPos = { x:0, y:0 };
+
+    // Planets: draw unless destroyed
+    planets.forEach((p)=>{
+      if (p.destroyed) return; // 파괴된 행성은 그리지 않음
+      const angleOrbit = (simTime / (p.period * 86400)) * Math.PI * 2;
+      const incRad = (p.inc || 0) * Math.PI / 180;
+      const x = Math.cos(angleOrbit) * p.r * SCALE;
+      const y = Math.sin(angleOrbit) * p.r * SCALE * Math.cos(incRad);
+
+      // 궤도 그리기
+      ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.ellipse(0,0,p.r*SCALE,p.r*SCALE*Math.cos(incRad),0,0,Math.PI*2); ctx.stroke();
+
+      // 행성 (시각적 반지름은 고정 작은 값)
+      ctx.beginPath(); ctx.fillStyle=p.color; ctx.arc(x,y,7,0,Math.PI*2); ctx.fill();
+
+      // 중력권 가시화 (테스트용, 반투명 원)
+      ctx.beginPath(); ctx.strokeStyle='rgba(100,200,255,0.08)'; ctx.lineWidth=1/zoom; ctx.arc(x,y,p.gravityRadius,0,Math.PI*2); ctx.stroke();
+
+      // 자전 표시
+      if (showRotation && p.rotationPeriod){
+        const angleSpin = (simTime / p.rotationPeriod) * Math.PI * 2;
+        ctx.beginPath(); ctx.strokeStyle='rgba(0,0,0,0.7)'; ctx.moveTo(x,y); ctx.lineTo(x+Math.cos(angleSpin)*7, y+Math.sin(angleSpin)*7); ctx.stroke();
+      }
+
+      if (p.name === 'Earth') earthPos = { x, y };
+
+      // TODO: 행성에 위성 표시 (편의상 생략 가능)
+    });
+
+    // ===== Ships update & draw =====
+    for (let s of ships){
+      // apply gravity from planets (vector sum)
+      let ax=0, ay=0;
+      for (let p of planets){ if (p.destroyed) continue; // 파괴된 행성 영향 없음
+        const px = Math.cos((simTime/(p.period*86400))*Math.PI*2) * p.r * SCALE;
+        const py = Math.sin((simTime/(p.period*86400))*Math.PI*2) * p.r * SCALE * Math.cos((p.inc||0)*Math.PI/180);
+        const dx = px - s.x, dy = py - s.y; const dist = Math.hypot(dx,dy) || 1e-6;
+        // 중력권 체크
+        if (dist < p.gravityRadius){
+          // 가속도: a = G * M / r^2 (여기선 단위를 픽셀 기반으로 튜닝)
+          const a = GRAVITY_CONST * p.mass / (dist*dist + 1);
+          ax += a * (dx/dist);
+          ay += a * (dy/dist);
+        }
+      }
+      // velocity update (simple Euler)
+      s.vx += ax * dt;
+      s.vy += ay * dt;
+      s.x += s.vx * dt * timeScale;
+      s.y += s.vy * dt * timeScale;
+
+      // draw ship (삼각형), 정지상태로 소환되지만 중력에 의해 움직일 수 있음
+      ctx.save(); ctx.translate(s.x, s.y);
+      const angle = Math.atan2(s.vy, s.vx) || 0;
+      ctx.rotate(angle + Math.PI/2);
+      ctx.fillStyle = '#66ffff'; ctx.beginPath(); ctx.moveTo(0,-6); ctx.lineTo(4,6); ctx.lineTo(-4,6); ctx.closePath(); ctx.fill();
+      ctx.restore();
+
+      // 충돌: ship이 행성에 너무 가까우면 (착륙/파괴) 처리 (간단히 제거)
+      for (let p of planets){ if (p.destroyed) continue; const px = Math.cos((simTime/(p.period*86400))*Math.PI*2) * p.r * SCALE; const py = Math.sin((simTime/(p.period*86400))*Math.PI*2) * p.r * SCALE * Math.cos((p.inc||0)*Math.PI/180); const d = Math.hypot(s.x-px, s.y-py); if (d < 9){ // 임계값
+          // 플레이스홀더: 우주선은 제거(도킹/파괴 시나리오 가능)
+          s.remove = true;
+          spawnExplosion(px,py);
+        }
+      }
+    }
+    // 실제 제거
+    for (let i=ships.length-1;i>=0;i--) if (ships[i].remove) ships.splice(i,1);
+
+    // ===== Update & draw asteroids =====
+    for (let i=asteroids.length-1;i>=0;i--){
+      const a = asteroids[i];
+      // apply gravity from planets
+      let ax=0, ay=0;
+      for (let p of planets){ if (p.destroyed) continue; const px = Math.cos((simTime/(p.period*86400))*Math.PI*2) * p.r * SCALE; const py = Math.sin((simTime/(p.period*86400))*Math.PI*2) * p.r * SCALE * Math.cos((p.inc||0)*Math.PI/180); const dx = px - a.x, dy = py - a.y; const dist = Math.hypot(dx,dy) || 1e-6; if (dist < p.gravityRadius){ const g = GRAVITY_CONST * p.mass / (dist*dist + 1); ax += g * (dx/dist); ay += g * (dy/dist); }
+      }
+      // update velocity & position
+      a.vx += ax * dt; a.vy += ay * dt;
+      a.x += a.vx * dt * timeScale; a.y += a.vy * dt * timeScale;
+
+      // check collisions with fields (walls)
+      for (const f of fields){ const { d, sx, sy } = pointSegDistance(a.x,a.y,f.x1,f.y1,f.x2,f.y2); if (d < a.r){ const { nx, ny } = segNormal(f.x1,f.y1,f.x2,f.y2); const refl = reflect(a.vx,a.vy,nx,ny); a.vx = refl.vx; a.vy = refl.vy; const push = (a.r - d) + 0.1; a.x = sx + nx*(a.r + 0.1); a.y = sy + ny*(a.r + 0.1); } }
+
+      // check collision with planets -> if impact, mark planet destroyed + spawn explosion, remove asteroid
+      for (let j=0;j<planets.length;j++){ const p = planets[j]; if (p.destroyed) continue; const px = Math.cos((simTime/(p.period*86400))*Math.PI*2) * p.r * SCALE; const py = Math.sin((simTime/(p.period*86400))*Math.PI*2) * p.r * SCALE * Math.cos((p.inc||0)*Math.PI/180); const d = Math.hypot(a.x-px, a.y-py); if (d < (7 + a.r) ){ // 행성 반지름(7픽셀) + asteroid radius
+          p.destroyed = true;
+          spawnExplosion(px,py);
+          asteroids.splice(i,1); // 충돌한 소행성 제거
+          break;
+        }
+      }
+
+      // draw asteroid
+      ctx.beginPath(); ctx.fillStyle='#dddddd'; ctx.arc(a.x,a.y,a.r,0,Math.PI*2); ctx.fill();
+    }
+
+    // ===== Draw fields (force walls) =====
+    ctx.lineWidth = 2/zoom;
+    for (const f of fields){ ctx.beginPath(); ctx.strokeStyle='rgba(0,200,255,0.8)'; ctx.moveTo(f.x1,f.y1); ctx.lineTo(f.x2,f.y2); ctx.stroke(); }
+
+    // ===== Draw explosions and handle animation =====
+    for (let i=explosions.length-1;i>=0;i--){ const ex=explosions[i]; ex.age += dt; const t = ex.age/ex.life; if (t>=1){ explosions.splice(i,1); continue;} const r = ex.radiusMax * t; const alpha = 1 - t; ctx.beginPath(); ctx.fillStyle = `rgba(255,120,40,${alpha})`; ctx.arc(ex.x, ex.y, r, 0, Math.PI*2); ctx.fill(); }
+
+    // 드래그 프리뷰
+    if (toolDragging && toolPath.length > 1){ ctx.beginPath(); ctx.strokeStyle = toolMode === 'asteroid' ? 'rgba(255,255,255,0.4)' : 'rgba(0,200,255,0.6)'; ctx.lineWidth = 1/zoom; ctx.moveTo(toolPath[0].x, toolPath[0].y); for (let i=1;i<toolPath.length;i++) ctx.lineTo(toolPath[i].x, toolPath[i].y); ctx.stroke(); }
+
+    ctx.restore();
+    requestAnimationFrame(draw);
+  }
+
+  requestAnimationFrame(draw);
+
+  // ===== Mouse: pan vs tool draw vs spawn ship =====
+  canvas.addEventListener('mousedown', (e) => {
+    const isToolActive = toolMode !== 'none';
+    const pos = { x: e.clientX, y: e.clientY };
+    if (isToolActive){ toolDragging = true; toolPath = []; const w = screenToWorld(pos.x,pos.y); toolPath.push(w); }
+    else { dragging = true; lastPos = pos; }
+  });
+
+  window.addEventListener('mouseup', (e) => {
+    if (toolDragging){
+      if (toolMode === 'asteroid'){
+        const speedK = 2.0;
+        for (let i=1;i<toolPath.length;i++){
+          const p0 = toolPath[i-1], p1 = toolPath[i]; const dx = p1.x-p0.x, dy = p1.y-p0.y; const segLen = Math.hypot(dx,dy); const steps = Math.max(1, Math.floor(segLen/6));
+          for (let s=0;s<steps;s++){ const t = s/steps; const x = p0.x + dx*t; const y = p0.y + dy*t; asteroids.push({ x, y, vx: dx*speedK, vy: dy*speedK, r: 2.2 }); }
+        }
+      } else if (toolMode === 'field'){
+        if (toolPath.length >= 2){ const p0 = toolPath[0], p1 = toolPath[toolPath.length-1]; fields.push({ x1:p0.x, y1:p0.y, x2:p1.x, y2:p1.y }); }
+      }
+      toolDragging=false; toolPath=[];
+    }
+    dragging=false;
+  });
+
+  window.addEventListener('mousemove', (e)=>{
+    const pos={x:e.clientX,y:e.clientY};
+    if (toolDragging){ const w=screenToWorld(pos.x,pos.y); const last=toolPath[toolPath.length-1]; if (!last || Math.hypot(w.x-last.x, w.y-last.y) > 4/zoom) toolPath.push(w); return; }
+    if (!dragging) return; const dx = pos.x - lastPos.x; const dy = pos.y - lastPos.y; offset.x += dx; offset.y += dy; lastPos = pos;
+  });
+
+  // 클릭으로 우주선 소환
+  canvas.addEventListener('click', (e)=>{
+    // 클릭이 드래그의 끝이거나 툴 비활성화일 때만 소환
+    if (toolMode !== 'none' || toolDragging) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left - canvas.width/2 - offset.x;
+    const y = e.clientY - rect.top - canvas.height/2 - offset.y;
+    spawnShipAtWorld(x,y);
+  });
+
+  // Spawn button도 추가
+  document.getElementById('spawnShipBtn').addEventListener('click', ()=>{
+    // 화면 중심 근처에 생성 (옵션)
+    const x = -offset.x; const y = -offset.y; spawnShipAtWorld(x,y);
+  });
+
+  // Zoom
+  canvas.addEventListener('wheel', (e)=>{
+    e.preventDefault(); const prev = zoom; zoom -= e.deltaY * 0.001; zoom = Math.min(Math.max(zoom,0.1),10); const rect=canvas.getBoundingClientRect(); const mx = e.clientX - rect.left - canvas.width/2 - offset.x; const my = e.clientY - rect.top - canvas.height/2 - offset.y; offset.x -= mx*(zoom/prev-1); offset.y -= my*(zoom/prev-1);
+  }, { passive:false });
+
+  // ===== UI wiring =====
+  const timeScaleSlider = document.getElementById('timeScale');
+  const timeScaleNum    = document.getElementById('timeScaleNum');
+  const timeScaleValue  = document.getElementById('timeScaleValue');
+  const showRotationInput = document.getElementById('showRotation');
+  const presetRow = document.getElementById('presetRow');
+  const toolButtons = [...document.querySelectorAll('.tool')];
+  const clearBtn = document.getElementById('clearAll');
+  const toolHint = document.getElementById('toolHint');
+
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+  function setTimeScale(v){ const val = clamp(Number(v)||0, 0.1, 50); timeScale = val; timeScaleSlider.value = val; timeScaleNum.value = val.toFixed(1); timeScaleValue.textContent = `×${val.toFixed(1)}`; [...presetRow.querySelectorAll('.preset')].forEach(btn=>{ const s = Number(btn.dataset.scale); btn.classList.toggle('active', Math.abs(s-val) < 1e-6); }); }
+  setTimeScale(timeScale);
+  timeScaleSlider.addEventListener('input',(e)=>setTimeScale(e.target.value)); timeScaleNum.addEventListener('input',(e)=>setTimeScale(e.target.value));
+  presetRow.addEventListener('click',(e)=>{ const btn = e.target.closest('.preset'); if (!btn) return; setTimeScale(btn.dataset.scale); });
+  showRotationInput.addEventListener('change',(e)=> showRotation = e.target.checked);
+
+  function setTool(mode){ toolMode = mode; toolButtons.forEach(b=>b.classList.toggle('active', b.dataset.tool===mode)); toolHint.textContent = mode==='asteroid' ? 'Asteroids: 캔버스에서 드래그하면 경로를 따라 소행성을 생성' : mode==='field' ? 'Force Field: 드래그로 벽(선분) 추가, 소행성은 튕깁니다' : '툴 비활성화 상태 (드래그는 화면 이동)'; }
+  setTool('none');
+  toolButtons.forEach(b=>b.addEventListener('click', ()=> setTool(b.dataset.tool)));
+  clearBtn.addEventListener('click', ()=>{ asteroids.length=0; fields.length=0; });
+
+</script>
+</body>
+</html>
