@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>Three.js 비모듈 태양계 (실제 자전/공전 + 자전축 표시)</title>
+<style>
+  html,body{height:100%;margin:0;background:#0b1020;color:#e9ecff;font:12px/1.4 system-ui}
+  #app{position:fixed; inset:0}
+  canvas{display:block; width:100%; height:100%}
+  .ui{
+    position:fixed; left:12px; top:12px; background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.12); padding:8px 10px; border-radius:10px;
+    display:flex; gap:10px; flex-wrap:wrap; align-items:center; max-width:96vw;
+  }
+  .row{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+  .ui label{opacity:.85}
+  .btn{cursor:pointer; padding:4px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.08)}
+  .btn:hover{background:rgba(255,255,255,.15)}
+  input[type="range"]{width:220px}
+  input[type="number"]{width:60px; background:transparent; border:1px solid rgba(255,255,255,.25); color:#e9ecff; border-radius:6px; padding:2px 6px}
+  select{background:transparent; color:#e9ecff; border:1px solid rgba(255,255,255,.25); border-radius:6px; padding:2px 6px}
+  .hint{opacity:.65}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div class="ui">
+  <div class="row">
+    <label for="speed">속도</label>
+    <input id="speed" type="range" min="0" max="8" step="0.1" value="1">
+    <input id="speedNum" type="number" min="0" max="8" step="0.1" value="1">
+    <button class="btn" data-rate="1">1×</button>
+    <button class="btn" data-rate="2">2×</button>
+    <button class="btn" data-rate="3">3×</button>
+    <button class="btn" data-rate="4">4×</button>
+    <button class="btn" data-rate="5">5×</button>
+  </div>
+  <div class="row">
+    <label for="focusSel">중심점</label>
+    <select id="focusSel">
+      <option>자유(수동)</option>
+      <option>태양</option>
+      <option selected>지구</option>
+      <option>수성</option><option>금성</option><option>달</option><option>화성</option>
+      <option>목성</option><option>토성</option><option>천왕성</option><option>해왕성</option>
+    </select>
+    <label><input id="axisToggle" type="checkbox" checked> 자전축 표시</label>
+    <span class="hint">• 좌클릭: 회전 · 휠: 줌 · 우클릭: 팬(자유 모드)</span>
+  </div>
+</div>
+
+<!-- 전역 THREE -->
+<script src="./three.min.js"></script>
+<script>
+/* ====== 렌더러/카메라/씬 ====== */
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(app.clientWidth, app.clientHeight);
+renderer.setClearColor(0x0b1020, 1);
+app.appendChild(renderer.domElement);
+
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, app.clientWidth/app.clientHeight, 0.1, 10000);
+
+/* ----- 오빗 카메라(수동) ----- */
+let radius = 220, phi = THREE.MathUtils.degToRad(25), theta = THREE.MathUtils.degToRad(30);
+const manualTarget = new THREE.Vector3(0,0,0);
+let focusTarget = null;
+function getTarget(){ return focusTarget ? focusTarget.getWorldPosition(new THREE.Vector3()) : manualTarget; }
+function updateCam(){
+  const t = getTarget();
+  const x = t.x + radius * Math.sin(phi) * Math.cos(theta);
+  const y = t.y + radius * Math.cos(phi);
+  const z = t.z + radius * Math.sin(phi) * Math.sin(theta);
+  camera.position.set(x,y,z);
+  camera.lookAt(t);
+}
+updateCam();
+
+/* ====== 조명 ====== */
+scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+const sunLight = new THREE.PointLight(0xffffff, 2.6, 0, 2);
+scene.add(sunLight);
+
+/* ====== 헬퍼 ====== */
+function orbitRing(r, color=0x2a3355){
+  const g = new THREE.RingGeometry(r-0.1, r+0.1, 256); g.rotateX(-Math.PI/2);
+  return new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent:true, opacity:.9 }));
+}
+function axisMesh(len, thick=0.06){
+  const g = new THREE.CylinderGeometry(thick, thick, len, 16);
+  const m = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.7, depthWrite:false });
+  const cyl = new THREE.Mesh(g, m);
+  cyl.position.y = 0; // 중앙 관통
+  return cyl;
+}
+
+const bodies = {};   // 이름 => 중심 pivot (카메라 포커스용)
+const axisList = []; // 축 토글 용
+
+/* ====== 스케일/단위 ======
+   - 거리/크기 모두 보기 좋게 축소
+   - 시간: 1× = 1일/초 (timeScale = 일/초)  */
+const SIZE = 1.0; // 행성 크기 전반 스케일 팩터(보기용)
+const DIST = 1.0; // 궤도 반지름 전반 스케일 팩터(보기용)
+let timeScale = 1; // [일/초] — 슬라이더/버튼/숫자 입력으로 조절
+
+/* ====== 태양 ====== */
+const sun = new THREE.Mesh(
+  new THREE.SphereGeometry(10*SIZE, 64, 64),
+  new THREE.MeshBasicMaterial({ color: 0xffc04d })
+);
+scene.add(sun);
+sunLight.position.copy(sun.position);
+
+/* ====== 행성/위성 생성 ====== */
+/**
+ * createBody(options)
+ * options:
+ *  - name, parent (Object3D)
+ *  - size (구 반지름, 보기용), color
+ *  - orbitDist (부모로부터 거리), orbitPeriodDays (일), retrogradeOrbit? (true면 반시계 반대)
+ *  - rotPeriodHours (자전 주기, 시). 음수면 역행(금성/천왕성 등)
+ *  - axialTiltDeg (자전축 경사)
+ * return: { orbit, pivot, spin, sphere, axis }
+ * 구조: parent → orbit(공전 회전) → pivot(거리만큼 위치) → spin(Z=tilt) → sphere/axis
+ */
+function createBody({
+  name, parent=scene, size=1, color=0xffffff,
+  orbitDist=0, orbitPeriodDays=0, retrogradeOrbit=false,
+  rotPeriodHours=24, axialTiltDeg=0, showOrbit=true
+}={}){
+
+  const pivot = new THREE.Group();
+  parent.add(pivot);
+
+  const spin = new THREE.Group();
+  spin.rotation.z = THREE.MathUtils.degToRad(axialTiltDeg);
+  pivot.add(spin);
+
+  const mat = new THREE.MeshStandardMaterial({ color, roughness:.7, metalness:0.0 });
+  const sphere = new THREE.Mesh(new THREE.SphereGeometry(size*SIZE, 32, 32), mat);
+  spin.add(sphere);
+
+  const ax = axisMesh(size*SIZE*3.0, Math.max(0.04, size*SIZE*0.08));
+  spin.add(ax);
+  axisList.push(ax);
+
+  if (showOrbit && parent === scene && orbitDist>0) scene.add(orbitRing(orbitDist*DIST));
+
+  const body = {
+    name,
+    pivot,    // 위치(공전 좌표를 여기 세팅)
+    spin,     // 자전축 + 자전 회전
+    sphere,
+    orbitDist: orbitDist*DIST,
+    orbitPeriodDays,
+    retrogradeOrbit,
+    rotPeriodHours,          // ✅ 자전 주기(시) 저장! (양수=반시계, 음수=시계)
+    orbitAngle: 0
+  };
+  bodies[name] = pivot;
+  return body;
+}
+/* ====== 실제(대표값) 데이터 ======
+   * 공전: 태양 기준 ‘항성주기’(days)
+   * 자전: ‘항성자전주기’(hours). 음수 = 역행(금성), 천왕성은 자전축 97.77° 경사
+   * 축경사(Obliquity): degrees
+   * 위성: 대표/주요 위성만 (거리·크기 보기 스케일 임의) */
+const planetDefs = [
+  { name:'수성', color:0xb4b4b4, size:0.9, dist:16, orbit:87.969, rotH:1407.6, tilt:0.03, moons:[] },
+  { name:'금성', color:0xd8b47d, size:1.1, dist:22, orbit:224.701, rotH:-5832.5, tilt:177.36, moons:[] },
+  { name:'지구', color:0x5fa8ff, size:1.2, dist:30, orbit:365.256, rotH:23.934, tilt:23.44,
+    moons:[
+      { name:'달', color:0xcfd6ff, size:0.35, dist:4.0, orbit:27.322, rotH:655.7, tilt:6.68 } // rotH≈동주기(27.3d)
+    ]
+  },
+  { name:'화성', color:0xff6b6b, size:0.9, dist:38, orbit:686.980, rotH:24.623, tilt:25.19,
+    moons:[
+      { name:'포보스', color:0xaaaaaa, size:0.12, dist:2.5, orbit:0.3189, rotH:7.65, tilt:0 },
+      { name:'데이모스', color:0xcccccc, size:0.08, dist:3.2, orbit:1.263, rotH:30.3, tilt:0 }
+    ]
+  },
+  { name:'목성', color:0xc89f68, size:4.0, dist:60, orbit:4332.589, rotH:9.925, tilt:3.13,
+    moons:[
+      { name:'이오', color:0xe6d27c, size:0.25, dist:6.0, orbit:1.769, rotH:42.46, tilt:0 },
+      { name:'유로파', color:0xdddddd, size:0.22, dist:7.5, orbit:3.551, rotH:85.2, tilt:0.1 },
+      { name:'가니메데', color:0xd0c8b0, size:0.32, dist:9.5, orbit:7.155, rotH:171.7, tilt:0.3 },
+      { name:'칼리스토', color:0x9c8f7a, size:0.29, dist:11.5, orbit:16.689, rotH:400.5, tilt:0.4 }
+    ]
+  },
+  { name:'토성', color:0xd8cfae, size:3.6, dist:78, orbit:10759.22, rotH:10.656, tilt:26.73,
+    ring:true,
+    moons:[
+      { name:'타이탄', color:0xcab47a, size:0.28, dist:8.0, orbit:15.945, rotH:382.7, tilt:0.3 },
+      { name:'레아', color:0xdddddd, size:0.18, dist:6.5, orbit:4.518, rotH:108.6, tilt:0 },
+      { name:'엔셀라두스', color:0xf1f8ff, size:0.12, dist:5.5, orbit:1.370, rotH:32.9, tilt:0 },
+      { name:'이아페투스', color:0x888888, size:0.16, dist:11.5, orbit:79.32, rotH:1903, tilt:0 }
+    ]
+  },
+  { name:'천왕성', color:0x9bd7ff, size:2.9, dist:96, orbit:30688.5, rotH:-17.24, tilt:97.77,
+    moons:[
+      { name:'티타니아', color:0xcccccc, size:0.18, dist:6.0, orbit:8.706, rotH:208.9, tilt:0 },
+      { name:'오버론', color:0xbfbfbf, size:0.17, dist:7.0, orbit:13.463, rotH:323.1, tilt:0 }
+    ]
+  },
+  { name:'해왕성', color:0x6aa7ff, size:2.8, dist:112, orbit:60182.0, rotH:16.11, tilt:28.32,
+    moons:[
+      { name:'트리톤', color:0xcfd6ff, size:0.22, dist:6.5, orbit:5.877, rotH:141.0, tilt:0, retrogradeOrbit:true }
+    ]
+  }
+];
+
+/* ====== 생성 ====== */
+const planetStates = [];
+for (const p of planetDefs) {
+  // 토성 고리(보기용)
+  let ring=null;
+  if (p.ring){
+    const g = new THREE.RingGeometry((p.size*SIZE)*2.0, (p.size*SIZE)*2.8, 128);
+    g.rotateX(-Math.PI/2);
+    ring = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color:0xd8cfae, roughness:.9, metalness:0, transparent:true, opacity:.7, side:THREE.DoubleSide }));
+  }
+
+  const plan = createBody({
+    name:p.name, size:p.size, color:p.color,
+    orbitDist:p.dist, orbitPeriodDays:p.orbit,
+    rotPeriodHours:p.rotH, axialTiltDeg:p.tilt,
+    showOrbit:true
+  });
+  if (ring) plan.pivot.add(ring);
+
+  // 위성 생성
+  const moons = [];
+  for (const m of (p.moons||[])) {
+    const moon = createBody({
+      name:m.name, parent: plan.pivot, size:m.size, color:m.color,
+      orbitDist:m.dist, orbitPeriodDays:m.orbit, retrogradeOrbit:m.retrogradeOrbit||false,
+      rotPeriodHours:m.rotH, axialTiltDeg:m.tilt, showOrbit:false
+    });
+    moons.push(moon);
+  }
+
+  planetStates.push({def:p, node:plan, moons});
+}
+
+/* ====== UI 바인딩 ====== */
+const speed = document.getElementById('speed');
+const speedNum = document.getElementById('speedNum');
+function setRate(v){
+  timeScale = Math.max(0, Number(v) || 0); // [일/초]
+  speed.value = String(timeScale);
+  speedNum.value = String(timeScale);
+}
+speed.addEventListener('input', e=> setRate(e.target.value));
+speedNum.addEventListener('input', e=> setRate(e.target.value));
+document.querySelectorAll('.btn[data-rate]').forEach(b=>{
+  b.addEventListener('click', ()=> setRate(b.dataset.rate));
+});
+
+const focusSel = document.getElementById('focusSel');
+function applyFocus(){
+  const v = focusSel.value;
+  if (v === '자유(수동)')      focusTarget = null;
+  else if (v === '태양')      focusTarget = sun;
+  else                        focusTarget = bodies[v] || null;
+  updateCam();
+}
+focusSel.addEventListener('change', applyFocus);
+
+const axisToggle = document.getElementById('axisToggle');
+axisToggle.addEventListener('change', ()=> axisList.forEach(ax => ax.visible = axisToggle.checked));
+axisList.forEach(ax => ax.visible = true);
+
+/* ====== 마우스 조작 ====== */
+let dragging=false, px=0, py=0, button=0;
+app.addEventListener('mousedown', e=>{ dragging=true; px=e.clientX; py=e.clientY; button=e.button; });
+window.addEventListener('mouseup',   ()=> dragging=false);
+app.addEventListener('contextmenu', e=> e.preventDefault());
+
+window.addEventListener('mousemove', e=>{
+  if(!dragging) return;
+  const dx = (e.clientX - px), dy = (e.clientY - py);
+  if (button === 0) { // 회전
+    theta -= dx * 0.005;
+    phi   -= dy * 0.005;
+    const eps = 0.001;
+    phi = Math.max(eps, Math.min(Math.PI-eps, phi));
+  } else if (button === 2) { // 팬(자유 모드에서만)
+    if (!focusTarget) {
+      const s = radius * 0.0012;
+      camera.updateMatrixWorld();
+      const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
+      const right = fwd.clone().cross(camera.up).normalize();
+      const up = camera.up.clone().normalize();
+      manualTarget.addScaledVector(right, -dx*s);
+      manualTarget.addScaledVector(up,     dy*s);
+    }
+  }
+  px = e.clientX; py = e.clientY;
+  updateCam();
+});
+
+// 줌
+app.addEventListener('wheel', e=>{
+  e.preventDefault();
+  radius *= (1 + Math.sign(e.deltaY)*0.08);
+  radius = Math.max(30, Math.min(2000, radius));
+  updateCam();
+},{passive:false});
+
+/* ====== 애니메이션 ======
+   dtSec: 실제 경과 초
+   일수 증가: dtDays = dtSec * timeScale
+   - 공전 각속도(rad/일) = 2π / orbitPeriodDays
+   - 자전 각속도(rad/일) = 2π / (rotPeriodHours/24)  */
+let last = performance.now();
+function tick(now){
+  const dtSec  = (now - last)/1000; last = now;
+  const dtDays = dtSec * timeScale;
+
+  // 태양 자전(표현용)
+  sun.rotation.y += dtDays * (2*Math.PI / 25.0);
+
+  for (const P of planetStates){
+    const {def, node, moons} = P;
+
+    // === 행성 공전 ===
+    if (node.orbitPeriodDays > 0) {
+      const sgn = node.retrogradeOrbit ? -1 : 1; // (행성은 보통 순행, 그대로 1)
+      node.orbitAngle += sgn * dtDays * (2*Math.PI / node.orbitPeriodDays);
+      const ca = Math.cos(node.orbitAngle), sa = Math.sin(node.orbitAngle);
+      node.pivot.position.set(ca*node.orbitDist, 0, -sa*node.orbitDist);
+    }
+
+    // === 행성 자전 ===
+    const rotDays = Math.abs(node.rotPeriodHours)/24;
+    const rotSgn  = node.rotPeriodHours>=0 ? 1 : -1;
+    if (rotDays>0) node.spin.rotation.y += rotSgn * dtDays * (2*Math.PI / rotDays);
+
+    // === 위성 ===
+    for (let i=0;i<moons.length;i++){
+      const mNode = moons[i];
+      const mDef  = def.moons[i];
+
+      if (mNode.orbitPeriodDays > 0) {
+        const mSgn = (mDef && mDef.retrogradeOrbit) ? -1 : 1;
+        mNode.orbitAngle += mSgn * dtDays * (2*Math.PI / mNode.orbitPeriodDays);
+        const ca = Math.cos(mNode.orbitAngle), sa = Math.sin(mNode.orbitAngle);
+        // 위성의 pivot은 '행성 pivot'의 자식이므로, 상대 좌표만 주면 됨
+        mNode.pivot.position.set(ca*mNode.orbitDist, 0, -sa*mNode.orbitDist);
+      }
+
+      const mRotDays = Math.abs(mNode.rotPeriodHours)/24;
+      const mRotSgn  = mNode.rotPeriodHours>=0 ? 1 : -1;
+      if (mRotDays>0) mNode.spin.rotation.y += mRotSgn * dtDays * (2*Math.PI / mRotDays);
+    }
+  }
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+/* ====== 리사이즈 ====== */
+addEventListener('resize', ()=>{
+  const w = app.clientWidth, h = app.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w/h;
+  camera.updateProjectionMatrix();
+});
+
+/* ====== 초기 뷰 ====== */
+document.getElementById('speed').value = '2';
+document.getElementById('speedNum').value = '2';
+timeScale = 2;                    // 기본 2×로 약간 빠르게
+focusSel.value = '지구'; applyFocus();
+radius = 180; updateCam();
+</script>
+</body>
+</html>
