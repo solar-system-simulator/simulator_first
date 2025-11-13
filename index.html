@@ -135,29 +135,73 @@ function createBodySimple({ name, size=1, color=0xffffff, axialTiltDeg=0 } = {})
 }
 
 // ---------- planet data with eccentricity (a=visual orbit radius) ----------
+// 행성 정의
 const planetDefs = [
-  // name, color, visual size, a-dist (scene units), orbitDays, rotH, axial tilt, eccentricity e
-  { name:'수성', color:0xb4b4b4, size:0.9, a:16, orbit:87.969, rotH:1407.6, tilt:0.03, e:0.2056 },
-  { name:'금성', color:0xd8b47d, size:1.1, a:22, orbit:224.701, rotH:-5832.5, tilt:177.36, e:0.0068 },
-  { name:'지구', color:0x5fa8ff, size:1.2, a:30, orbit:365.256, rotH:23.934, tilt:23.44, e:0.0167,
+  { name:'수성', color:0xb4b4b4, size:0.9, a:16, orbit:87.969, rotH:1407.6, tilt:0.03, e:0.2056, i: 7.0 },
+  { name:'금성', color:0xd8b47d, size:1.1, a:22, orbit:224.701, rotH:-5832.5, tilt:177.36, e:0.0068, i: 3.4 },
+  { name:'지구', color:0x5fa8ff, size:1.2, a:30, orbit:365.256, rotH:23.934, tilt:23.44, e:0.0167,  i: 0.0,
     moons:[ { name:'달', color:0xcfd6ff, size:0.35, a:4.0, orbit:27.322, rotH:655.7, tilt:6.68 } ]
   },
-  { name:'화성', color:0xff6b6b, size:0.9, a:38, orbit:686.980, rotH:24.623, tilt:25.19, e:0.0934,
-    moons:[ { name:'포보스', color:0xaaaaaa, size:0.12, a:2.5, orbit:0.3189, rotH:7.65, tilt:0 }, { name:'데이모스', color:0xcccccc, size:0.08, a:3.2, orbit:1.263, rotH:30.3, tilt:0 } ]
+  { name:'화성', color:0xff6b6b, size:0.9, a:38, orbit:686.980, rotH:24.623, tilt:25.19, e:0.0934, i: 1.85,
+    moons:[ { name:'포보스', color:0xaaaaaa, size:0.12, a:2.5, orbit:0.3189, rotH:7.65, tilt:0 },
+            { name:'데이모스', color:0xcccccc, size:0.08, a:3.2, orbit:1.263, rotH:30.3, tilt:0 } ]
   },
-  { name:'목성', color:0xc89f68, size:4.0, a:60, orbit:4332.589, rotH:9.925, tilt:3.13, e:0.0489,
-    moons:[ { name:'이오', color:0xe6d27c, size:0.25, a:6.0, orbit:1.769, rotH:42.46, tilt:0 }, { name:'유로파', color:0xdddddd, size:0.22, a:7.5, orbit:3.551, rotH:85.2, tilt:0.1 } ]
+  { name:'목성', color:0xc89f68, size:4.0, a:60, orbit:4332.589, rotH:9.925, tilt:3.13, e:0.0489, i: 1.3,
+    moons:[ { name:'이오', color:0xe6d27c, size:0.25, a:6.0, orbit:1.769, rotH:42.46, tilt:0 },
+            { name:'유로파', color:0xdddddd, size:0.22, a:7.5, orbit:3.551, rotH:85.2, tilt:0.1 } ]
   },
-  { name:'토성', color:0xd8cfae, size:3.6, a:78, orbit:10759.22, rotH:10.656, tilt:26.73, e:0.0565, ring:true,
+  { name:'토성', color:0xd8cfae, size:3.6, a:78, orbit:10759.22, rotH:10.656, tilt:26.73, e:0.0565, i: 2.48, ring:true,
     moons:[ { name:'타이탄', color:0xcab47a, size:0.28, a:8.0, orbit:15.945, rotH:382.7, tilt:0.3 } ]
   },
-  { name:'천왕성', color:0x9bd7ff, size:2.9, a:96, orbit:30688.5, rotH:-17.24, tilt:97.77, e:0.0457,
+  { name:'천왕성', color:0x9bd7ff, size:2.9, a:96, orbit:30688.5, rotH:-17.24, tilt:97.77, e:0.0457, i: 0.77,
     moons:[ { name:'티타니아', color:0xcccccc, size:0.18, a:6.0, orbit:8.706, rotH:208.9, tilt:0 } ]
   },
-  { name:'해왕성', color:0x6aa7ff, size:2.8, a:112, orbit:60182.0, rotH:16.11, tilt:28.32, e:0.0113,
+  { name:'해왕성', color:0x6aa7ff, size:2.8, a:112, orbit:60182.0, rotH:16.11, tilt:28.32, e:0.0113, i: 1.77,
     moons:[ { name:'트리톤', color:0xcfd6ff, size:0.22, a:6.5, orbit:5.877, rotH:141.0, tilt:0, retrogradeOrbit:true } ]
   }
 ];
+
+// =====================
+// 궤도 라인 생성
+// =====================
+function createOrbit(def) {
+  const e = def.e || 0;
+  const a = def.a;
+  const b = a * Math.sqrt(1 - e*e);
+  const iRad = THREE.MathUtils.degToRad(def.i || 0);
+
+  const curve = new THREE.EllipseCurve(-e*a, 0, a, b, 0, 2*Math.PI, false, 0);
+  const points = curve.getPoints(256).map(p => {
+    const y = p.y * Math.sin(iRad);
+    const z = p.y * Math.cos(iRad);
+    return new THREE.Vector3(p.x, y, z);
+  });
+
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({ color:def.color, transparent:true, opacity:0.4 });
+  const line = new THREE.LineLoop(geometry, material);
+  return line;
+}
+
+// =====================
+// tick()에서 행성 위치 업데이트
+// =====================
+function updatePlanetPosition(ps, timeScale) {
+  const def = ps.def;
+  const e = def.e || 0;
+  const a = def.a;
+  const b = a * Math.sqrt(1 - e*e);
+  const iRad = THREE.MathUtils.degToRad(def.i || 0);
+
+  ps.orbitAngle += (1 / def.orbit) * timeScale;
+
+  const ang = ps.orbitAngle;
+  const x = a * (Math.cos(ang) - e);
+  const y = b * Math.sin(ang) * Math.sin(iRad);
+  const z = b * Math.sin(ang) * Math.cos(iRad);
+
+  ps.node.group.position.set(x, y, z);
+}
 
 // create planetStates with elliptical orbit parameters
 const planetStates = [];
@@ -559,6 +603,7 @@ radius = 180; updateCam();
 </script>
 </body>
 </html>
+
 
 
 
