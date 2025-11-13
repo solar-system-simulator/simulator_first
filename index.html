@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
-<title>3D 태양계</title>
+<title>3D 태양계 — 이심률(e) : 태양을 타원 초점으로 (이벤트 포함)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
   html,body{height:100%;margin:0;background:#061024;color:#e9f2ff;font:12px/1.4 system-ui}
@@ -23,6 +23,7 @@
 </head>
 <body>
 <div id="app"></div>
+
 <div class="ui">
   <div class="row">
     <label for="speed">속도</label>
@@ -40,7 +41,7 @@
       <option>태양</option>
       <option selected>지구</option>
       <option>수성</option><option>금성</option><option>달</option><option>화성</option>
-      <option>목성</option><option>토성</option><option>천왕성</option><option>해왕성</option><option>명왕성</option>
+      <option>목성</option><option>토성</option><option>천왕성</option><option>해왕성</option>
     </select>
     <label><input id="axisToggle" type="checkbox" checked> 자전축 표시</label>
     <span class="hint">• 좌클릭: 회전 · 휠: 줌 · 우클릭: 팬(자유 모드)</span>
@@ -54,8 +55,17 @@
   </div>
 </div>
 
+<!-- Three.js UMD -->
 <script src="https://unpkg.com/three@0.155.0/build/three.min.js"></script>
+
 <script>
+/*
+  3D 태양계 (태양을 타원의 초점으로 하는 이심률 적용)
+  + 소행성/우주선 이벤트, 중력권, 충돌/폭발, AI 슬롯 통합
+  주석: 핵심 로직은 tick() 내에서 이심률 기반 위치 계산 및 이벤트 업데이트
+*/
+
+// ---------- 기본 렌더러/씬/카메라 ----------
 const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -96,14 +106,15 @@ function axisMesh(len, thick=0.06){
 }
 
 // containers
-const bodies = {};
+const bodies = {}; // name -> pivot
 const axisList = [];
 
 // scale/time
 const SIZE = 1.0;
-let timeScale = 2; // day/sec
+const DIST = 1.0;
+let timeScale = 2; // day / sec
 
-// Sun
+// ---------- Sun ----------
 const sun = new THREE.Mesh(
   new THREE.SphereGeometry(10*SIZE, 64, 64),
   new THREE.MeshBasicMaterial({ color: 0xffd97a })
@@ -111,8 +122,9 @@ const sun = new THREE.Mesh(
 scene.add(sun);
 sunLight.position.copy(sun.position);
 
-// createBody
+// ---------- createBody (구조는 pivot 대신, 위치는 수식으로 직접 설정) ----------
 function createBodySimple({ name, size=1, color=0xffffff, axialTiltDeg=0 } = {}) {
+  // Each body has a group used to hold the mesh (for axis)
   const group = new THREE.Group();
   const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
   const sphere = new THREE.Mesh(new THREE.SphereGeometry(size*SIZE, 32,32), mat);
@@ -122,96 +134,429 @@ function createBodySimple({ name, size=1, color=0xffffff, axialTiltDeg=0 } = {})
   return { name, group, sphere, axis: ax, size };
 }
 
-// createOrbitPlane: 실사 궤도면
-function createOrbitPlane(def){
-  const e = def.e || 0;
-  const a = def.a;
-  const b = a * Math.sqrt(1 - e*e);
-  const segments = 128;
-  const points = [];
-  for (let i=0;i<=segments;i++){
-    const theta = (i/segments)*2*Math.PI;
-    const x = a*Math.cos(theta) - e*a;
-    const z = b*Math.sin(theta);
-    points.push(new THREE.Vector3(x,0,z));
-  }
-  const shape = new THREE.Shape(points.map(p=>new THREE.Vector2(p.x,p.z)));
-  const geometry = new THREE.ShapeGeometry(shape);
-  const material = new THREE.MeshBasicMaterial({ color:def.color, transparent:true, opacity:0.08, side:THREE.DoubleSide });
-  const mesh = new THREE.Mesh(geometry, material);
-  const iRad = THREE.MathUtils.degToRad(def.i||0);
-  mesh.rotation.x = iRad;
-  scene.add(mesh);
-  return mesh;
-}
-
-// 행성 정의 (명왕성 포함)
+// ---------- planet data with eccentricity (a=visual orbit radius) ----------
 const planetDefs = [
-  { name:'수성', color:0xb4b4b4, size:0.9, a:16, orbit:87.969, rotH:1407.6, tilt:0.03, e:0.2056, i:7.0 },
-  { name:'금성', color:0xd8b47d, size:1.1, a:22, orbit:224.701, rotH:-5832.5, tilt:177.36, e:0.0068, i:3.4 },
-  { name:'지구', color:0x5fa8ff, size:1.2, a:30, orbit:365.256, rotH:23.934, tilt:23.44, e:0.0167, i:0.0,
-    moons:[{ name:'달', color:0xcfd6ff, size:0.35, a:4.0, orbit:27.322, rotH:655.7, tilt:6.68 }] },
-  { name:'화성', color:0xff6b6b, size:0.9, a:38, orbit:686.980, rotH:24.623, tilt:25.19, e:0.0934, i:1.85,
-    moons:[ { name:'포보스', color:0xaaaaaa, size:0.12, a:2.5, orbit:0.3189, rotH:7.65, tilt:0 },
-            { name:'데이모스', color:0xcccccc, size:0.08, a:3.2, orbit:1.263, rotH:30.3, tilt:0 } ] },
-  { name:'목성', color:0xc89f68, size:4.0, a:60, orbit:4332.589, rotH:9.925, tilt:3.13, e:0.0489, i:1.3,
-    moons:[ { name:'이오', color:0xe6d27c, size:0.25, a:6.0, orbit:1.769, rotH:42.46, tilt:0 },
-            { name:'유로파', color:0xdddddd, size:0.22, a:7.5, orbit:3.551, rotH:85.2, tilt:0.1 } ] },
-  { name:'토성', color:0xd8cfae, size:3.6, a:78, orbit:10759.22, rotH:10.656, tilt:26.73, e:0.0565, i:2.48, ring:true,
-    moons:[{ name:'타이탄', color:0xcab47a, size:0.28, a:8.0, orbit:15.945, rotH:382.7, tilt:0.3 }] },
-  { name:'천왕성', color:0x9bd7ff, size:2.9, a:96, orbit:30688.5, rotH:-17.24, tilt:97.77, e:0.0457, i:0.77,
-    moons:[{ name:'티타니아', color:0xcccccc, size:0.18, a:6.0, orbit:8.706, rotH:208.9, tilt:0 }] },
-  { name:'해왕성', color:0x6aa7ff, size:2.8, a:112, orbit:60182.0, rotH:16.11, tilt:28.32, e:0.0113, i:1.77,
-    moons:[{ name:'트리톤', color:0xcfd6ff, size:0.22, a:6.5, orbit:5.877, rotH:141.0, tilt:0, retrogradeOrbit:true }] },
-  { name:'명왕성', color:0x9999cc, size:0.6, a:140, orbit:90560, rotH:-153.3, tilt:122.5, e:0.2488, i:17.16 }
+  // name, color, visual size, a-dist (scene units), orbitDays, rotH, axial tilt, eccentricity e
+  { name:'수성', color:0xb4b4b4, size:0.9, a:16, orbit:87.969, rotH:1407.6, tilt:0.03, e:0.2056 },
+  { name:'금성', color:0xd8b47d, size:1.1, a:22, orbit:224.701, rotH:-5832.5, tilt:177.36, e:0.0068 },
+  { name:'지구', color:0x5fa8ff, size:1.2, a:30, orbit:365.256, rotH:23.934, tilt:23.44, e:0.0167,
+    moons:[ { name:'달', color:0xcfd6ff, size:0.35, a:4.0, orbit:27.322, rotH:655.7, tilt:6.68 } ]
+  },
+  { name:'화성', color:0xff6b6b, size:0.9, a:38, orbit:686.980, rotH:24.623, tilt:25.19, e:0.0934,
+    moons:[ { name:'포보스', color:0xaaaaaa, size:0.12, a:2.5, orbit:0.3189, rotH:7.65, tilt:0 }, { name:'데이모스', color:0xcccccc, size:0.08, a:3.2, orbit:1.263, rotH:30.3, tilt:0 } ]
+  },
+  { name:'목성', color:0xc89f68, size:4.0, a:60, orbit:4332.589, rotH:9.925, tilt:3.13, e:0.0489,
+    moons:[ { name:'이오', color:0xe6d27c, size:0.25, a:6.0, orbit:1.769, rotH:42.46, tilt:0 }, { name:'유로파', color:0xdddddd, size:0.22, a:7.5, orbit:3.551, rotH:85.2, tilt:0.1 } ]
+  },
+  { name:'토성', color:0xd8cfae, size:3.6, a:78, orbit:10759.22, rotH:10.656, tilt:26.73, e:0.0565, ring:true,
+    moons:[ { name:'타이탄', color:0xcab47a, size:0.28, a:8.0, orbit:15.945, rotH:382.7, tilt:0.3 } ]
+  },
+  { name:'천왕성', color:0x9bd7ff, size:2.9, a:96, orbit:30688.5, rotH:-17.24, tilt:97.77, e:0.0457,
+    moons:[ { name:'티타니아', color:0xcccccc, size:0.18, a:6.0, orbit:8.706, rotH:208.9, tilt:0 } ]
+  },
+  { name:'해왕성', color:0x6aa7ff, size:2.8, a:112, orbit:60182.0, rotH:16.11, tilt:28.32, e:0.0113,
+    moons:[ { name:'트리톤', color:0xcfd6ff, size:0.22, a:6.5, orbit:5.877, rotH:141.0, tilt:0, retrogradeOrbit:true } ]
+  }
 ];
 
-// planetStates 생성
+// create planetStates with elliptical orbit parameters
 const planetStates = [];
-for(const def of planetDefs){
-  const b = def.a * Math.sqrt(1-(def.e||0)*(def.e||0));
-  const body = createBodySimple({ name:def.name, size:def.size, color:def.color, axialTiltDeg:def.tilt });
+for (const def of planetDefs){
+  const b = def.a * Math.sqrt(1 - (def.e || 0)*(def.e || 0)); // minor axis scale
+  // create visual orbit line (ellipse) centered at (-e*a, 0, 0) so that sun at origin is focus
+  const curve = new THREE.EllipseCurve( - (def.e||0) * def.a, 0, def.a, b, 0, 2*Math.PI, false, 0 );
+  const points = curve.getPoints(256);
+  const orbitGeometry = new THREE.BufferGeometry().setFromPoints(points.map(p => new THREE.Vector3(p.x, 0, p.y)));
+  const orbitMaterial = new THREE.LineBasicMaterial({ color: def.color, transparent:true, opacity:0.35 });
+  const orbitLine = new THREE.LineLoop(orbitGeometry, orbitMaterial);
+  scene.add(orbitLine);
+
+  // create body mesh
+  const body = createBodySimple({ name:def.name, size:def.size, color:def.color, axialTiltDeg:def.tilt});
   scene.add(body.group);
 
-  // 궤도면
-  createOrbitPlane(def);
-
-  // 토성 링
-  if(def.ring){
-    const ringGeom = new THREE.RingGeometry((def.size*SIZE)*2.0,(def.size*SIZE)*2.8,128);
+  // ring for Saturn if needed
+  if (def.ring){
+    const ringGeom = new THREE.RingGeometry((def.size*SIZE)*2.0, (def.size*SIZE)*2.8, 128);
     ringGeom.rotateX(-Math.PI/2);
     const ringMat = new THREE.MeshStandardMaterial({ color:0xd8cfae, roughness:0.9, metalness:0, transparent:true, opacity:0.7, side:THREE.DoubleSide });
     const ring = new THREE.Mesh(ringGeom, ringMat);
     body.group.add(ring);
   }
 
-  // moons
-  const moons=[];
-  if(def.moons){
-    for(const m of def.moons){
+  // add moons relative data (we will compute their positions around the parent)
+  const moons = [];
+  if (def.moons){
+    for (const m of def.moons){
       const mBody = createBodySimple({ name:m.name, size:m.size, color:m.color, axialTiltDeg:m.tilt });
+      // add child group to planet group for simple local orbit
       body.group.add(mBody.group);
       moons.push({ def:m, node:mBody, orbitAngle:0 });
     }
   }
 
-  const MASS_RATIO = { '수성':0.055,'금성':0.815,'지구':1.0,'화성':0.107,'목성':317.8,'토성':95.2,'천왕성':14.5,'해왕성':17.1,'명왕성':0.0022 };
+  // compute approximate gravity radius & mass ratio as previous
+  const MASS_RATIO = { '수성':0.055,'금성':0.815,'지구':1.0,'화성':0.107,'목성':317.8,'토성':95.2,'천왕성':14.5,'해왕성':17.1 };
   const massRatio = MASS_RATIO[def.name] || 0.2;
   const MAX_MASS = 317.8;
-  const gravityRadius = Math.max(20, def.a*0.25 + (massRatio/MAX_MASS)*def.a*2.0);
+  const gravityRadius = Math.max(20, def.a * 0.25 + (massRatio / MAX_MASS) * def.a * 2.0);
 
-  planetStates.push({
-    def, node:body, moons, a:def.a, b:b, e:def.e||0,
-    orbitAngle:Math.random()*Math.PI*2, rotPeriodHours:def.rotH,
-    gravityRadius, massRatio, _gravRing:null, _destroyed:false
-  });
+  const pstate = {
+    def,
+    node: body,
+    moons,
+    a: def.a,
+    b: b,
+    e: def.e || 0,
+    orbitLine,
+    orbitAngle: Math.random()*Math.PI*2,
+    rotPeriodHours: def.rotH,
+    gravityRadius,
+    massRatio,
+    _gravRing: null,
+    _destroyed: false
+  };
 
+  // add a subtle gravity ring mesh (will be attached to planet's world position)
+  const ringMesh = new THREE.Mesh(
+    new THREE.RingGeometry(pstate.gravityRadius * 0.95, pstate.gravityRadius * 1.05, 64).rotateX(-Math.PI/2),
+    new THREE.MeshBasicMaterial({ color: def.color, transparent:true, opacity:0.06, side:THREE.DoubleSide })
+  );
+  pstate._gravRing = ringMesh; // we'll position it in tick by copying planet world pos and rotation
+  scene.add(ringMesh);
+
+  planetStates.push(pstate);
   bodies[def.name] = body.group;
 }
 
-// === UI, mouse, entities, tick 등은 기존 코드 그대로 사용 ===
-// 기존 tick(), updateEntities(), spawnShipAt(), spawnAsteroidAt(), UI 바인딩 모두 그대로 유지
+// ---------- UI binding ----------
+const speed = document.getElementById('speed');
+const speedNum = document.getElementById('speedNum');
+function setRate(v){ timeScale = Math.max(0, Number(v) || 0); speed.value = String(timeScale); speedNum.value = String(timeScale); }
+speed.addEventListener('input', e=> setRate(e.target.value));
+speedNum.addEventListener('input', e=> setRate(e.target.value));
+document.querySelectorAll('.btn[data-rate]').forEach(b=> b.addEventListener('click', ()=> setRate(b.dataset.rate)));
 
+const focusSel = document.getElementById('focusSel');
+function applyFocus(){
+  const v = focusSel.value;
+  if (v === '자유(수동)') focusTarget = null;
+  else if (v === '태양') focusTarget = sun;
+  else focusTarget = bodies[v] || null;
+  updateCam();
+}
+focusSel.addEventListener('change', applyFocus);
+
+const axisToggle = document.getElementById('axisToggle');
+axisToggle.addEventListener('change', ()=> axisList.forEach(ax => ax.visible = axisToggle.checked));
+axisList.forEach(ax => ax.visible = true);
+
+// ---------- mouse controls ----------
+let dragging=false, px=0, py=0, button=0;
+app.addEventListener('mousedown', e=>{ dragging=true; px=e.clientX; py=e.clientY; button=e.button; });
+window.addEventListener('mouseup', ()=> dragging=false);
+app.addEventListener('contextmenu', e=> e.preventDefault());
+
+window.addEventListener('mousemove', e=>{
+  if (!dragging) return;
+  const dx = (e.clientX - px), dy = (e.clientY - py);
+  if (button === 0) { theta -= dx * 0.005; phi -= dy * 0.005; const eps = 0.001; phi = Math.max(eps, Math.min(Math.PI-eps, phi)); }
+  else if (button === 2) { if (!focusTarget) { const s = radius * 0.0012; camera.updateMatrixWorld(); const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); const right = fwd.clone().cross(camera.up).normalize(); const up = camera.up.clone().normalize(); manualTarget.addScaledVector(right, -dx*s); manualTarget.addScaledVector(up, dy*s); } }
+  px = e.clientX; py = e.clientY; updateCam();
+});
+app.addEventListener('wheel', e=>{ e.preventDefault(); radius *= (1 + Math.sign(e.deltaY)*0.08); radius = Math.max(30, Math.min(2000, radius)); updateCam(); },{passive:false});
+
+// ---------- Entities: ships, asteroids, explosions ----------
+const ships = [];      // { mesh, vel:Vector3, ai:{mode,brain}, remove:Boolean }
+const asteroids = [];  // { mesh, vel:Vector3, remove:Boolean }
+const explosions = []; // { particles:[], life, age }
+
+// raycaster + plane y=0
+const raycaster = new THREE.Raycaster();
+const mouseVec = new THREE.Vector2();
+const groundPlane = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
+
+// helper: pointer -> world on y=0
+function pointerToWorld(clientX, clientY){
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouseVec.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  mouseVec.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouseVec, camera);
+  const p = new THREE.Vector3();
+  raycaster.ray.intersectPlane(groundPlane, p);
+  return p;
+}
+
+// spawn explosion
+function spawnExplosion(position){
+  const group = [];
+  const particleCount = 12 + Math.floor(Math.random()*18);
+  for (let i=0;i<particleCount;i++){
+    const g = new THREE.SphereGeometry(0.3 + Math.random()*0.6, 6,6);
+    const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(0.05 + Math.random()*0.08, 0.85, 0.5), transparent:true });
+    const m = new THREE.Mesh(g, mat);
+    m.position.copy(position);
+    m.userData.v = new THREE.Vector3((Math.random()-0.5)*2, (Math.random()-0.2)*2, (Math.random()-0.5)*2);
+    scene.add(m);
+    group.push(m);
+  }
+  explosions.push({ particles:group, life:1.6, age:0 });
+}
+
+// spawn asteroid
+function spawnAsteroidAt(pos){
+  const geom = new THREE.SphereGeometry(0.6 + Math.random()*1.4, 8,8);
+  const mat = new THREE.MeshStandardMaterial({ color:0x9e9e9e, roughness:1.0 });
+  const m = new THREE.Mesh(geom, mat);
+  m.position.copy(pos);
+  scene.add(m);
+  const vel = new THREE.Vector3((Math.random()-0.5)*0.6, (Math.random()-0.5)*0.2, (Math.random()-0.5)*0.6);
+  asteroids.push({ mesh:m, vel, remove:false });
+}
+
+// spawn ship (cone, initially stationary)
+function spawnShipAt(pos){
+  const geom = new THREE.ConeGeometry(1.0, 2.4, 12);
+  const mat = new THREE.MeshStandardMaterial({ color:0x66ffff, emissive:0x113344, roughness:0.4 });
+  const m = new THREE.Mesh(geom, mat);
+  m.rotation.x = Math.PI/2;
+  m.position.copy(pos);
+  scene.add(m);
+  const ship = { mesh:m, vel:new THREE.Vector3(0,0,0), ai:{ mode:'idle', brain:null }, remove:false };
+  ships.push(ship);
+  return ship;
+}
+
+// UI bindings
+document.getElementById('spawnAsteroidBtn').addEventListener('click', ()=>{
+  const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+  const pos = camera.position.clone().add(dir.multiplyScalar(radius * 0.6));
+  spawnAsteroidAt(pos);
+});
+document.getElementById('spawnShipBtn').addEventListener('click', ()=>{
+  const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+  const pos = camera.position.clone().add(dir.multiplyScalar(radius * 0.6));
+  spawnShipAt(pos);
+});
+document.getElementById('clearShipsBtn').addEventListener('click', ()=>{
+  for (const s of ships) scene.remove(s.mesh);
+  ships.length = 0;
+});
+
+// pointer spawn: left-click spawns ship (shift-click spawns asteroid)
+renderer.domElement.addEventListener('pointerdown', (ev)=>{
+  if (ev.button !== 0) return;
+  const p = pointerToWorld(ev.clientX, ev.clientY);
+  if (ev.shiftKey) spawnAsteroidAt(p);
+  else spawnShipAt(p);
+});
+
+// ---------- updateEntities: gravity, collisions, explosions ----------
+function updateEntities(dtSec){
+  // update explosions
+  for (let i=explosions.length-1;i>=0;i--){
+    const ex = explosions[i]; ex.age += dtSec;
+    for (const p of ex.particles){
+      p.position.addScaledVector(p.userData.v, dtSec*4);
+      p.material.opacity = Math.max(0, 1 - ex.age/ex.life);
+      p.scale.setScalar(1 + ex.age*1.5);
+    }
+    if (ex.age >= ex.life){
+      for (const p of ex.particles) scene.remove(p);
+      explosions.splice(i,1);
+    }
+  }
+
+  // cache planet positions
+  const planetPositions = planetStates.map(ps => {
+    const pos = new THREE.Vector3();
+    // current planet position computed from a,e,b,orbitAngle in tick() — but getWorldPosition is safe
+    ps.node.group.getWorldPosition(pos);
+    return { ps, pos };
+  });
+
+  // asteroids
+  for (let i=asteroids.length-1;i>=0;i--){
+    const a = asteroids[i];
+    if (a.remove){ scene.remove(a.mesh); asteroids.splice(i,1); continue; }
+    const acc = new THREE.Vector3();
+    for (const {ps, pos} of planetPositions){
+      if (ps._destroyed) continue;
+      const rVec = pos.clone().sub(a.mesh.position);
+      const dist = rVec.length();
+      if (dist < ps.gravityRadius && dist > 0.1){
+        const strength = (ps.massRatio / 317.8) * 600; // tuning
+        const aMag = strength / (dist*dist + 1);
+        acc.addScaledVector(rVec.normalize(), aMag);
+        if (document.getElementById('showGravity').checked){
+          a.mesh.material.emissive = new THREE.Color(ps.def.color).multiplyScalar(0.12);
+        }
+      }
+    }
+    a.vel.add(acc.multiplyScalar(dtSec));
+    a.mesh.position.addScaledVector(a.vel, dtSec);
+
+    // collision with planets (approx)
+    for (const {ps, pos} of planetPositions){
+      if (ps._destroyed) continue;
+      const dist = pos.distanceTo(a.mesh.position);
+      const approxPlanetRadius = ps.def.size * SIZE * 1.0;
+      if (dist < approxPlanetRadius * 0.9 + (a.mesh.geometry.parameters.radius || 1.0)){
+        if (!ps._destroyed){
+          ps._destroyed = true;
+          // remove visual sphere from planet node
+          if (ps.node.group.children.length) ps.node.group.remove(ps.node.group.children[0]);
+          if (ps._gravRing) scene.remove(ps._gravRing);
+          spawnExplosion(pos);
+        }
+        a.remove = true;
+        break;
+      }
+    }
+    if (a.remove){ scene.remove(a.mesh); asteroids.splice(i,1); continue; }
+  }
+
+  // ships
+  for (let i=ships.length-1;i>=0;i--){
+    const s = ships[i];
+    if (s.remove){ scene.remove(s.mesh); ships.splice(i,1); continue; }
+    const acc = new THREE.Vector3();
+    for (const {ps, pos} of planetPositions){
+      if (ps._destroyed) continue;
+      const rVec = pos.clone().sub(s.mesh.position);
+      const dist = rVec.length();
+      if (dist < ps.gravityRadius && dist > 0.1){
+        const strength = (ps.massRatio / 317.8) * 600;
+        const aMag = strength / (dist*dist + 1);
+        acc.addScaledVector(rVec.normalize(), aMag);
+        if (document.getElementById('showGravity').checked) s.mesh.material.emissive = new THREE.Color(ps.def.color).multiplyScalar(0.08);
+      }
+    }
+
+    // AI slot (stub)
+    if (s.ai && s.ai.brain){
+      // place to call inference: compute sensor vector and call model
+    }
+
+    s.vel.add(acc.multiplyScalar(dtSec));
+    s.mesh.position.addScaledVector(s.vel, dtSec);
+
+    // orient to velocity
+    const speedMag = s.vel.length();
+    if (speedMag > 0.0001){
+      const dir = s.vel.clone().normalize();
+      const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1), dir);
+      s.mesh.quaternion.slerp(quat, 0.06);
+    }
+
+    // collision with planets
+    for (const {ps, pos} of planetPositions){
+      if (ps._destroyed) continue;
+      const dist = pos.distanceTo(s.mesh.position);
+      const approxPlanetRadius = ps.def.size * SIZE * 1.0;
+      if (dist < approxPlanetRadius * 0.9 + 1.0){
+        s.remove = true;
+        spawnExplosion(pos);
+        break;
+      }
+    }
+  }
+
+  updateCam();
+}
+
+// ---------- tick(): compute elliptical orbits with focus at sun ----------
+let last = performance.now();
+function tick(now){
+  const dtSec = (now - last) / 1000; last = now;
+  const dtDays = dtSec * timeScale;
+
+  // sun rotation (visual)
+  sun.rotation.y += dtDays * (2*Math.PI / 25.0);
+
+  // iterate planets: compute θ increment and set positions using x = a(cosθ - e), z = b sinθ
+  for (const ps of planetStates){
+    if (ps._destroyed) {
+      // still update orbit angle for consistency
+      ps.orbitAngle += dtDays * (2*Math.PI / Math.max(1, ps.def.orbit));
+      continue;
+    }
+
+    // increment angle: 2π / period * dtDays
+    const sgn = 1;
+    ps.orbitAngle += sgn * dtDays * (2*Math.PI / ps.def.orbit);
+
+    const ang = ps.orbitAngle;
+    const a = ps.a;
+    const e = ps.e;
+    const b = ps.b;
+
+    // position relative to sun (sun at origin, focus at origin)
+    const x = a * (Math.cos(ang) - e);
+    const z = b * Math.sin(ang);
+    // set group's world position (group refers to body.group)
+    ps.node.group.position.set(x, 0, z);
+
+    // rotate spin for axial rotation
+    const rotDays = Math.abs(ps.rotPeriodHours)/24;
+    const rotSgn = ps.rotPeriodHours >= 0 ? 1 : -1;
+    if (rotDays > 0){
+      // spin rotation is local: rotate the first child (sphere & axis) if exists
+      if (ps.node.group.children[0]) ps.node.group.children[0].rotation.y += rotSgn * dtDays * (2*Math.PI / rotDays);
+    }
+
+    // position the gravity ring to follow planet
+    if (ps._gravRing){
+      ps._gravRing.position.set(x, 0.01, z);
+      ps._gravRing.rotation.x = -Math.PI/2;
+      ps._gravRing.visible = (document.getElementById('showGravity').checked && !ps._destroyed);
+    }
+
+    // moons: local orbit around the planet: use stored moon.orbitAngle
+    for (let i=0;i<ps.moons.length;i++){
+      const m = ps.moons[i];
+      const mdef = ps.def.moons[i];
+      m.orbitAngle += dtDays * (2*Math.PI / m.def.orbit);
+      const ca = Math.cos(m.orbitAngle), sa = Math.sin(m.orbitAngle);
+      const mx = ca * m.def.a;
+      const mz = -sa * m.def.a;
+      m.node.group.position.set(mx, 0, mz); // relative to parent (we added moon group to parent)
+      // moon rotation
+      const mRotDays = Math.abs(m.node.def ? m.node.def.rotH : (m.def.rotH || 24))/24;
+      if (mRotDays > 0 && m.node.group.children[0]) m.node.group.children[0].rotation.y += dtDays * (2*Math.PI / (Math.abs(m.def.rotH)/24 || 1));
+    }
+  }
+
+  // update entities physics
+  updateEntities(dtSec);
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+// ---------- resize ----------
+addEventListener('resize', ()=>{
+  const w = app.clientWidth, h = app.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w/h;
+  camera.updateProjectionMatrix();
+});
+
+// ---------- initial view ----------
+document.getElementById('speed').value = '2';
+document.getElementById('speedNum').value = '2';
+timeScale = 2;
+focusSel.value = '지구'; applyFocus();
+radius = 180; updateCam();
+
+/* Notes:
+ - 궤도 식: x = a*(cosθ - e), z = b*sinθ. 여기서 태양(원점)=초점.
+ - orbitLine created with EllipseCurve centered at (-e*a,0) so that line visually matches path where sun is a focus.
+ - 성능: 다수 소행성은 InstancedMesh 전환을 권장.
+ - AI: ship.ai.brain 자리에 TF.js 모델을 로드해 추론 가능 (추후 작업).
+*/
 </script>
 </body>
 </html>
+
