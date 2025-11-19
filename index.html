@@ -2,39 +2,29 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
-<title>Three.js 태양계 (중력 시뮬레이션 + 우주선)</title>
+<title>Three.js 태양계 (중력 시뮬레이션 + 타원궤도 · 위성 · 라그랑주)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
-  html,body{height:100%;margin:0;background:#0b1020;color:#e9ecff;font:12px/1.4 system-ui}
+  html,body{height:100%;margin:0;background:#051022;color:#e9ecff;font:13px/1.45 system-ui}
   #app{position:fixed; inset:0}
   canvas{display:block; width:100%; height:100%}
-  .ui{
-    position:fixed; left:12px; top:12px; background:rgba(255,255,255,.06);
-    border:1px solid rgba(255,255,255,.12); padding:8px 10px; border-radius:10px;
-    display:flex; gap:10px; flex-wrap:wrap; align-items:center; max-width:96vw;
-  }
+  .ui{position:fixed; left:12px; top:12px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); padding:10px; border-radius:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; max-width:96vw}
   .row{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
-  .ui label{opacity:.85}
-  .btn{cursor:pointer; padding:4px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.08)}
-  .btn:hover{background:rgba(255,255,255,.15)}
-  input[type="range"]{width:220px}
-  input[type="number"]{width:60px; background:transparent; border:1px solid rgba(255,255,255,.25); color:#e9ecff; border-radius:6px; padding:2px 6px}
-  select{background:transparent; color:#e9ecff; border:1px solid rgba(255,255,255,.25); border-radius:6px; padding:2px 6px}
-  .hint{opacity:.65}
-  .small{font-size:11px; opacity:.9}
+  .btn{cursor:pointer; padding:6px 9px; border-radius:8px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.03)}
+  input[type=range]{width:200px}
+  input[type=number]{width:70px}
+  .small{font-size:11px; opacity:.85}
 </style>
 </head>
 <body>
 <div id="app"></div>
-
 <div class="ui">
   <div class="row">
     <label for="speed">속도 (일/초)</label>
-    <input id="speed" type="range" min="0" max="100" step="0.1" value="2">
-    <input id="speedNum" type="number" min="0" max="1000" step="0.1" value="2">
+    <input id="speed" type="range" min="0" max="500" step="0.1" value="2">
+    <input id="speedNum" type="number" min="0" max="10000" step="0.1" value="2">
     <button class="btn" data-rate="1">1×</button>
     <button class="btn" data-rate="10">10×</button>
-    <button class="btn" data-rate="50">50×</button>
     <button class="btn" data-rate="100">100×</button>
   </div>
   <div class="row">
@@ -46,7 +36,7 @@
       <option>목성</option><option>토성</option><option>천왕성</option><option>해왕성</option><option>명왕성</option>
     </select>
     <label><input id="axisToggle" type="checkbox" checked> 자전축 표시</label>
-    <label><input id="gravToggle" type="checkbox"> 항성(태양) 중력장 표시</label>
+    <label><input id="gravToggle" type="checkbox"> 중력장 표시(행성 포함)</label>
   </div>
   <div class="row">
     <button class="btn" id="spawnShip">우주선 소환</button>
@@ -56,451 +46,203 @@
   </div>
   <div class="row small">
     <div>시작 시각: <span id="startTime">2025-01-01 00:00:00</span></div>
-    <div class="hint">• 좌클릭: 회전 · 휠: 줌 · 우클릭: 팬(자유 모드)</div>
+    <div class="small">• 좌클릭: 회전 · 휠: 줌 · 우클릭: 팬</div>
   </div>
 </div>
-
-<!-- 전역 THREE -->
 <script src="./three.min.js"></script>
 <script>
-/* ======================================================
-   업데이트 내용 요약 (한글 주석 포함)
-   - 행성/위성: 사용자가 제공한 실제 데이터 기반으로 배치
-   - 시간 시작: 2025-01-01 00:00
-   - 소행성군 소환 삭제(기본으로 없음)
-   - 중력장(항성 중심)을 적용: 소환된 우주선/소행성에 중력 계산 적용
-   - 우주선 소환/삭제: 버튼으로 제어, 중력 영향으로 움직임
-   - 충돌 처리: 행성/항성/소행성과 충돌 시 폭발(삭제)
-   - 변수 조정 UI에 한글 주석 추가
-   ====================================================== */
+/* 전체 반영본
+   - 이심률 기반 타원 궤도(케플러 방정식으로 E 풀이)
+   - 행성별 주요 위성 자동 생성 (대표 위성만 포함)
+   - 라그랑주 포인트(L1,L2,L3,L4,L5) 표시 (근사식)
+   - 동적 객체(우주선/소행성)는 중력의 영향을 받음 (velocity verlet)
+   - 행성은 태양-중심 케플러 궤도로 계산 (태양 우선, n-체 계산은 제한적으로 적용)
+*/
 
-/* ====== 렌더러/카메라/씬 ====== */
 const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias:true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.setSize(app.clientWidth, app.clientHeight);
-renderer.setClearColor(0x0b1020, 1);
+renderer.setClearColor(0x051022,1);
 app.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, app.clientWidth/app.clientHeight, 0.1, 20000);
 
-const scene  = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(60, app.clientWidth/app.clientHeight, 0.1, 10000);
-
-/* ----- 오빗 카메라(수동) ----- */
-let radius = 220, phi = THREE.MathUtils.degToRad(25), theta = THREE.MathUtils.degToRad(30);
-const manualTarget = new THREE.Vector3(0,0,0);
-let focusTarget = null;
+let radius = 220, phi = THREE.MathUtils.degToRad(28), theta = THREE.MathUtils.degToRad(40);
+const manualTarget = new THREE.Vector3(0,0,0); let focusTarget = null;
 function getTarget(){ return focusTarget ? focusTarget.getWorldPosition(new THREE.Vector3()) : manualTarget; }
-function updateCam(){
-  const t = getTarget();
-  const x = t.x + radius * Math.sin(phi) * Math.cos(theta);
-  const y = t.y + radius * Math.cos(phi);
-  const z = t.z + radius * Math.sin(phi) * Math.sin(theta);
-  camera.position.set(x,y,z);
-  camera.lookAt(t);
-}
+function updateCam(){ const t = getTarget(); const x = t.x + radius*Math.sin(phi)*Math.cos(theta); const y = t.y + radius*Math.cos(phi); const z = t.z + radius*Math.sin(phi)*Math.sin(theta); camera.position.set(x,y,z); camera.lookAt(t); }
 updateCam();
 
-/* ====== 물리/시뮬레이션 설정 ====== */
-// 시간 및 시뮬레이션 변수 (한글 주석 포함)
-let simDate = new Date('2025-01-01T00:00:00Z'); // 시뮬레이션 시작 시점 (UTC 기준)
-let timeScale = 2; // 시간 배속 (일/초). UI로 조절. 1 = 1일이 시뮬레이션에서 1초 흐름
-const G = 0.0002959122082855911; // 중력 상수(시뮬용 축약값) — 단위는 임의 스케일에 맞춤
+// 시뮬레이션 시간
+let simDate = new Date('2025-01-01T00:00:00Z');
+let timeScale = 2; // 일/초
+const G = 0.0002959122082855911; // 시뮬레이션용 스케일 중력상수
 
-/* ====== 조명 ====== */
-scene.add(new THREE.AmbientLight(0xffffff, 0.35));
-const sunLight = new THREE.PointLight(0xffffff, 2.6, 0, 2);
-scene.add(sunLight);
+scene.add(new THREE.AmbientLight(0xffffff,0.35));
+const sunLight = new THREE.PointLight(0xffffff,2.2,0,2); scene.add(sunLight);
 
-/* ====== 헬퍼 ====== */
-function orbitRing(r, color=0x2a3355){
-  const g = new THREE.RingGeometry(r-0.15, r+0.15, 256); g.rotateX(-Math.PI/2);
-  return new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent:true, opacity:.85 }));
-}
-function axisMesh(len, thick=0.06){
-  const g = new THREE.CylinderGeometry(thick, thick, len, 16);
-  const m = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.7, depthWrite:false });
-  const cyl = new THREE.Mesh(g, m);
-  cyl.position.y = 0; // 중앙 관통
-  return cyl;
-}
+// 저장
+const bodies = {}; const heavyBodies = []; const axisList = []; const dynamicObjects = []; const lagrangeHelpers = [];
 
-/* ====== 엔티티 저장 구조 ====== */
-const bodies = {};   // 이름 => 중심 pivot (카메라 포커스용)
-const heavyBodies = []; // 중력 계산에 포함되는 천체(질량 보유)
-const axisList = []; // 축 토글 용
-const dynamicObjects = []; // 우주선, 소행성 등 중력 영향을 받는 물체
+const SIZE = 1, DIST = 1;
 
-/* ====== 스케일/단위 ======
-   - 거리/크기 모두 보기 좋게 축소
-   - 시뮬레이션 내 질량은 크기^3 (간단화)
-*/
-const SIZE = 1.0; // 행성 크기 전반 스케일 팩터(보기용)
-const DIST = 1.0; // 궤도 반지름 전반 스케일 팩터(보기용)
+// 유틸
+function mkRing(r,color=0x2a3355,opacity=0.8){ const g=new THREE.RingGeometry(r-0.12,r+0.12,256); g.rotateX(-Math.PI/2); return new THREE.Mesh(g,new THREE.MeshBasicMaterial({color,transparent:true,opacity,side:THREE.DoubleSide})); }
+function mkAxis(len){ const g=new THREE.CylinderGeometry(0.04,0.04,len,8); const m=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0.75}); const c=new THREE.Mesh(g,m); c.position.y=0; return c; }
 
-/* ====== 태양(중력원) ====== */
-const sun = new THREE.Mesh(
-  new THREE.SphereGeometry(10*SIZE, 64, 64),
-  new THREE.MeshBasicMaterial({ color: 0xffc04d })
-);
-scene.add(sun);
-sunLight.position.copy(sun.position);
-
-/* ====== createBody 함수 (자전/공전 + 중력 속성 포함) ====== */
-function createBody({
-  name, parent=scene, size=1, color=0xffffff,
-  orbitDist=0, orbitPeriodDays=0, retrogradeOrbit=false,
-  rotPeriodHours=24, axialTiltDeg=0, showOrbit=true, massScale=1
-}={}){
-
-  const pivot = new THREE.Group();
-  parent.add(pivot);
-
-  const spin = new THREE.Group();
-  spin.rotation.z = THREE.MathUtils.degToRad(axialTiltDeg);
-  pivot.rotation.x = THREE.MathUtils.degToRad(orbitInc);
-  pivot.add(spin);
-
-  const mat = new THREE.MeshStandardMaterial({ color, roughness:.7, metalness:0.0 });
-  const sphere = new THREE.Mesh(new THREE.SphereGeometry(size*SIZE, 32, 32), mat);
-  spin.add(sphere);
-
-  const ax = axisMesh(size*SIZE*3.0, Math.max(0.04, size*SIZE*0.08));
-  spin.add(ax);
-  axisList.push(ax);
-
-  if (showOrbit && parent === scene && orbitDist>0) scene.add(orbitRing(orbitDist*DIST));
-
-  // 물리 속성: 간단화를 위해 질량은 (size^3)*massScale
-  const mass = Math.max(1e-4, Math.pow(size*SIZE, 1.5) * massScale);
-
-  const body = {
-    name,
-    pivot,    // 공전 좌표
-    spin,     // 자전축 + 자전 회전
-    sphere,
-    mesh: sphere,
-    orbitDist: orbitDist*DIST,
-    orbitPeriodDays,
-    retrogradeOrbit,
-    rotPeriodHours,
-    orbitAngle: Math.random()*Math.PI*2,
-    mass,
-    // 월드 pos getter
-    getWorldPosition(){ return pivot.getWorldPosition(new THREE.Vector3()); }
-  };
-
-  bodies[name] = body;
-  heavyBodies.push(body);
-  return body;
+// create body supports ecc and orbitInc
+function createBody({name,parent=scene,size=1,color=0xffffff,orbitDist=0,orbitPeriodDays=0,rotPeriodHours=24,axialTiltDeg=0,ecc=0,orbitInc=0,massScale=1,showOrbit=true,primary=null}={}){
+  const pivot = new THREE.Group(); parent.add(pivot);
+  pivot.rotation.x = THREE.MathUtils.degToRad(orbitInc || 0);
+  const spin = new THREE.Group(); spin.rotation.z = THREE.MathUtils.degToRad(axialTiltDeg || 0); pivot.add(spin);
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(size*SIZE,32,32), new THREE.MeshStandardMaterial({color,roughness:0.85}));
+  spin.add(mesh);
+  const ax = mkAxis(size*3); spin.add(ax); axisList.push(ax);
+  if (showOrbit && parent===scene && orbitDist>0) scene.add(mkRing(orbitDist*DIST,0x335577,0.12));
+  const mass = Math.max(1e-6, Math.pow(size,3)*massScale);
+  const body = {name,pivot,spin,mesh,orbitDist:orbitDist*DIST,orbitPeriodDays,rotPeriodHours,mass,ecc,orbitInc,primary,meanAnomaly:Math.random()*Math.PI*2,semiMajor:orbitDist*DIST};
+  bodies[name]=body; heavyBodies.push(body); return body;
 }
 
-/* ====== 사용자가 제공한 천체 데이터(원문 기초) ====== */
-// 입력값 기반으로 거리·크기·주기 등을 보기좋게 조정
-const defs = [
-  { name:'태양', size:10, dist:0, orbit:0, rotH:25.38, tilt:7.25, ecc:0, orbitInc:0, massScale:1000000 },
-  { name:'수성', size:0.9, dist:16, orbit:87.969, rotH:58.65*24, tilt:0.0, ecc:0.2056, orbitInc:7.0, massScale:0.055 },
-  { name:'금성', size:1.1, dist:22, orbit:224.701, rotH:-243.0185*24, tilt:177.3, ecc:0.0068, orbitInc:3.39, massScale:0.815 },
-  { name:'지구', size:1.2, dist:30, orbit:365.256, rotH:0.997*24, tilt:23.44, ecc:0.0167, orbitInc:0.0, massScale:1 },
-  { name:'화성', size:0.9, dist:38, orbit:686.98, rotH:1.02595676*24, tilt:25.19, ecc:0.0934, orbitInc:1.85, massScale:0.107 },
-  { name:'목성', size:4.0, dist:60, orbit:4332.59, rotH:0.410*24, tilt:3.13, ecc:0.0489, orbitInc:1.305, massScale:318 },
-  { name:'토성', size:3.6, dist:78, orbit:10756.2, rotH:0.43*24, tilt:26.7, ecc:0.05565, orbitInc:2.484, massScale:95 },
-  { name:'천왕성', size:2.9, dist:96, orbit:30707.49, rotH:-0.72*24, tilt:97.77, ecc:0.0472, orbitInc:0.77, massScale:14 },
-  { name:'해왕성', size:2.8, dist:112, orbit:60223.35, rotH:0.67*24, tilt:28.32, ecc:0.0086, orbitInc:1.769, massScale:17 },
-  { name:'명왕성', size:0.5, dist:140, orbit:90560, rotH:-6.3872*24, tilt:122.53, ecc:0.2488, orbitInc:17.14, massScale:0.0022 }
+// 데이터 (실제 값 기반 — 시각화 스케일로 변환)
+const defs=[
+  {name:'태양',size:10,dist:0,orbit:0,rotH:25.38,tilt:7.25,ecc:0,orbitInc:0,massScale:1e6,color:'#ffd54a'},
+  {name:'수성',size:0.9,dist:16,orbit:87.969,rotH:58.6462*24,tilt:0.01,ecc:0.205630,orbitInc:7.005,color:'#555555',massScale:0.055},
+  {name:'금성',size:1.1,dist:22,orbit:224.701,rotH:-243.0185*24,tilt:177.36,ecc:0.006772,orbitInc:3.394,color:'#fff7c4',massScale:0.815},
+  {name:'지구',size:1.2,dist:30,orbit:365.256,rotH:0.99726963*24,tilt:23.44,ecc:0.01671123,orbitInc:0.000,color:'#3a82ff',massScale:1},
+  {name:'화성',size:0.9,dist:38,orbit:686.98,rotH:1.02595676*24,tilt:25.19,ecc:0.0933941,orbitInc:1.850,color:'#d14b3a',massScale:0.107},
+  {name:'목성',size:4.0,dist:60,orbit:4332.59,rotH:0.41354*24,tilt:3.13,ecc:0.04839266,orbitInc:1.305,color:'#e6b56a',massScale:318},
+  {name:'토성',size:3.6,dist:78,orbit:10756.2,rotH:0.44401*24,tilt:26.73,ecc:0.055723,orbitInc:2.485,color:'#d2b48c',massScale:95},
+  {name:'천왕성',size:2.9,dist:96,orbit:30707.49,rotH:-0.71833*24,tilt:97.77,ecc:0.04565,orbitInc:0.77,color:'#6ecff6',massScale:14},
+  {name:'해왕성',size:2.8,dist:112,orbit:60223.35,rotH:0.67125*24,tilt:28.32,ecc:0.00859048,orbitInc:1.769,color:'#264bff',massScale:17},
+  {name:'명왕성',size:0.5,dist:140,orbit:90560,rotH:-6.3872*24,tilt:122.53,ecc:0.24883,orbitInc:17.14,color:'#bbaea0',massScale:0.0022}
 ];
 
-/* ====== 생성: 태양/행성/위성 (간단한 위성 추가) ====== */
+// 생성
 const planetStates = [];
-for (const p of defs){
-  const plan = createBody({ name:p.name, size:p.size, color:0xffffff, orbitDist:p.dist, orbitPeriodDays:p.orbit, rotPeriodHours:p.rotH, axialTiltDeg:p.tilt, massScale:p.massScale, showOrbit: p.dist>0 });
-  // 색상 임의 분배
-  // 행성 고유 색상 지정
-      switch(p.name){
-        case '태양': plan.mesh.material.color.set('#ffd54a'); break;
-        case '수성': plan.mesh.material.color.set('#555555'); break;
-        case '금성': plan.mesh.material.color.set('#fff7c4'); break;
-        case '지구': plan.mesh.material.color.set('#3a82ff'); break;
-        case '화성': plan.mesh.material.color.set('#d14b3a'); break;
-        case '목성': plan.mesh.material.color.set('#e6b56a'); break;
-        case '토성': plan.mesh.material.color.set('#d2b48c'); break;
-        case '천왕성': plan.mesh.material.color.set('#6ecff6'); break;
-        case '해왕성': plan.mesh.material.color.set('#264bff'); break;
-        case '명왕성': plan.mesh.material.color.set('#bbaea0'); break;
-      })*0.6+0.1, 0.6, 0.5);
-  planetStates.push({def:p, node:plan, moons:[]});
+for(const p of defs){
+  const b = createBody({name:p.name,size:p.size,orbitDist:p.dist,orbitPeriodDays:p.orbit,rotPeriodHours:p.rotH,axialTiltDeg:p.tilt,ecc:p.ecc,orbitInc:p.orbitInc,massScale:p.massScale,color:p.color});
+  planetStates.push({def:p,node:b,moons:[]});
 }
 
-// 지구의 달(예시)
-const moon = createBody({ name:'달', parent: bodies['지구'].pivot, size:0.35, color:0xcfd6ff, orbitDist:4.0, orbitPeriodDays:27.322, rotPeriodHours:655.7, axialTiltDeg:6.68, massScale:0.0123, showOrbit:false });
-
-/* ====== 링(토성) 비주얼 추가 (간단) ====== */
-// 토성 고리 (보기용)
+// 지구 달 추가 (예시)
 (function(){
-  const sat = bodies['토성'];
-  if (sat){
-    const r = (3.6*SIZE)*2.0;
-    const g = new THREE.RingGeometry(r, r*1.6, 128);
-    g.rotateX(-Math.PI/2);
-    const ring = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color:0xd8cfae, roughness:.9, metalness:0, transparent:true, opacity:.6, side:THREE.DoubleSide }));
-    sat.pivot.add(ring);
+  const earth = bodies['지구'];
+  if(earth){
+    const m = createBody({name:'달',parent:earth.pivot,size:0.35,orbitDist:4,orbitPeriodDays:27.322,rotPeriodHours:655.7,axialTiltDeg:6.68,massScale:0.0123,color:'#cfd6ff',showOrbit:false});
+    planetStates.find(x=>x.def.name==='지구').moons.push(Object.assign(m,{orbitDist:4,orbitPeriodDays:27.322,orbitalAngle:Math.random()*Math.PI*2}));
   }
 })();
 
-/* ====== 동적 객체(우주선/소행성) ====== */
-function spawnSpaceship(pos=new THREE.Vector3(0,40,0), vel=new THREE.Vector3(0,0,0)){
-  const g = new THREE.ConeGeometry(0.6, 1.6, 8);
-  g.rotateX(Math.PI/2);
-  const m = new THREE.MeshStandardMaterial({ color:0x88ffdd, roughness:0.6 });
-  const mesh = new THREE.Mesh(g, m);
-  mesh.position.copy(pos);
-  scene.add(mesh);
-  const obj = { type:'ship', mesh, pos:mesh.position.clone(), vel:vel.clone(), mass:0.01, radius:0.8 };
-  dynamicObjects.push(obj);
-  return obj;
-}
-function spawnAsteroid(pos, vel){
-  const s = Math.random()*0.6 + 0.2;
-  const m = new THREE.Mesh(new THREE.DodecahedronGeometry(s,0), new THREE.MeshStandardMaterial({ color:0x999999 }));
-  m.position.copy(pos);
-  scene.add(m);
-  const obj = { type:'asteroid', mesh:m, pos:m.position.clone(), vel:vel.clone(), mass:Math.pow(s,3)*0.2, radius:s };
-  dynamicObjects.push(obj);
-  return obj;
-}
-
-/* ====== 충돌 처리 (간단) ====== */
-function explodeAt(position){
-  // 간단한 폭발 이펙트: 작은 파티클 몇개를 생성 후 제거
-  const group = new THREE.Group();
-  const n = 12;
-  for (let i=0;i<n;i++){
-    const p = new THREE.Mesh(new THREE.SphereGeometry(0.08,6,6), new THREE.MeshBasicMaterial({ color:0xffaa44 }));
-    p.position.copy(position);
-    p.userData.v = new THREE.Vector3((Math.random()-0.5)*2, (Math.random()-0.5)*2, (Math.random()-0.5)*2).multiplyScalar(0.6);
-    group.add(p);
-  }
-  scene.add(group);
-  // 파티클 애니메이션(간단) 1.5초 후 제거
-  const t0 = performance.now();
-  const tid = setInterval(()=>{
-    const dt = (performance.now()-t0)/1000;
-    group.children.forEach(ch=> ch.position.addScaledVector(ch.userData.v, 0.04));
-    if (dt>1.5){ clearInterval(tid); scene.remove(group); }
-  }, 50);
-}
-
-/* ====== 중력 계산 ====== */
-function computeGravitationalAcceleration(pos){
-  // pos: Vector3, return: Vector3 accel
-  const a = new THREE.Vector3(0,0,0);
-  for (const b of heavyBodies){
-    // 행성은 pivot에 위치 (world)
-    const bp = b.getWorldPosition();
-    const rvec = new THREE.Vector3().subVectors(bp, pos);
-    const r2 = Math.max(0.01, rvec.lengthSq());
-    const r = Math.sqrt(r2);
-    // F = G * m / r^2
-    const accMag = G * b.mass / r2;
-    a.addScaledVector(rvec.normalize(), accMag);
-  }
-  return a;
-}
-
-/* ====== UI 바인딩 ====== */
-const speed = document.getElementById('speed');
-const speedNum = document.getElementById('speedNum');
-function setRate(v){
-  timeScale = Math.max(0, Number(v) || 0); // [일/초]
-  speed.value = String(timeScale);
-  speedNum.value = String(timeScale);
-}
-speed.addEventListener('input', e=> setRate(e.target.value));
-speedNum.addEventListener('input', e=> setRate(e.target.value));
-document.querySelectorAll('.btn[data-rate]').forEach(b=>{ b.addEventListener('click', ()=> setRate(b.dataset.rate)); });
-
-const focusSel = document.getElementById('focusSel');
-function applyFocus(){
-  const v = focusSel.value;
-  if (v === '자유(수동)')      focusTarget = null;
-  else                        focusTarget = (bodies[v] ? bodies[v].pivot : null) || sun;
-  updateCam();
-}
-focusSel.addEventListener('change', applyFocus);
-
-const axisToggle = document.getElementById('axisToggle');
-axisToggle.addEventListener('change', ()=> axisList.forEach(ax => ax.visible = axisToggle.checked));
-axisList.forEach(ax => ax.visible = true);
-
-const gravToggle = document.getElementById('gravToggle');
-let showGravityField = false;
-gravToggle.addEventListener('change', ()=>{ showGravityField = gravToggle.checked; updateGravityHelpers(); });
-
-/* ====== 중력장 시각화(항성 중심으로 간단 표시) ====== */
-let gravHelpers = [];
-// 중력장 시각화: 태양 + 모든 행성
-let gravHelpers = [];
-function updateGravityHelpers(){
-  // 기존 제거
-  gravHelpers.forEach(h=> scene.remove(h)); gravHelpers.length=0;
-  if (!showGravityField) return;
-  // 각 항성(여기선 태양만 큰 항성) 주위에 방사형 화살표 생성
-  const star = bodies['태양'];
-  if (!star) return;
-  const center = star.getWorldPosition();
-  const rList = [20,40,60,80,100];
-  for (const r of rList){
-    const g = new THREE.RingGeometry(r-0.2, r+0.2, 128);
-    g.rotateX(-Math.PI/2);
-    const m = new THREE.MeshBasicMaterial({ color:0x66ccff, transparent:true, opacity:0.12, side:THREE.DoubleSide });
-    const ring = new THREE.Mesh(g,m);
-    ring.position.copy(center);
-    gravHelpers.push(ring); scene.add(ring);
-  }
-}
-
-/* ====== 마우스/카메라 조작 ====== */
-let dragging=false, px=0, py=0, button=0;
-app.addEventListener('mousedown', e=>{ dragging=true; px=e.clientX; py=e.clientY; button=e.button; });
-window.addEventListener('mouseup',   ()=> dragging=false);
-app.addEventListener('contextmenu', e=> e.preventDefault());
-
-window.addEventListener('mousemove', e=>{
-  if(!dragging) return;
-  const dx = (e.clientX - px), dy = (e.clientY - py);
-  if (button === 0) { // 회전
-    theta -= dx * 0.005;
-    phi   -= dy * 0.005;
-    const eps = 0.001;
-    phi = Math.max(eps, Math.min(Math.PI-eps, phi));
-  } else if (button === 2) { // 팬(자유 모드에서만)
-    if (!focusTarget) {
-      const s = radius * 0.0012;
-      camera.updateMatrixWorld();
-      const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
-      const right = fwd.clone().cross(camera.up).normalize();
-      const up = camera.up.clone().normalize();
-      manualTarget.addScaledVector(right, -dx*s);
-      manualTarget.addScaledVector(up,     dy*s);
+// 대표 위성 자동 추가 (목성/토성 등 주요 몇 개만)
+const majorMoons = {
+  '목성':[ ['이오',0.7,1.769,'#ffd1a8'],['유로파',1.3,3.551,'#cfe8ff'],['가니메데',2.1,7.154,'#e9d5b3'],['칼리스토',3.0,16.689,'#c2b7a1'] ],
+  '토성':[ ['타이탄',3.5,15.95,'#d9c28a'],['엔셀라두스',1.1,1.37,'#dfeaf7'] ],
+  '천왕성':[ ['티타니아',1.6,8.7,'#cfe6ff'],['오베론',2.0,13.5,'#bfb8a6'] ],
+  '해왕성':[ ['트리톤',2.1,5.88,'#98bfff'] ],
+  '명왕성':[ ['카론',1.2,6.387,'#b0a59a'] ]
+};
+for(const ps of planetStates){
+  const name = ps.def.name;
+  if(majorMoons[name]){
+    for(const mm of majorMoons[name]){
+      const [mname, mdist, mperiod, mcol] = mm;
+      const moon = createBody({name:mname, parent: ps.node.pivot, size:0.25, color:mcol, orbitDist: mdist, orbitPeriodDays: mperiod, massScale:0.01, showOrbit:false});
+      ps.moons.push(Object.assign(moon,{orbitDist:mdist,orbitPeriodDays:mperiod,orbitalAngle:Math.random()*Math.PI*2}));
     }
   }
-  px = e.clientX; py = e.clientY;
-  updateCam();
-});
-
-app.addEventListener('wheel', e=>{
-  e.preventDefault();
-  radius *= (1 + Math.sign(e.deltaY)*0.08);
-  radius = Math.max(30, Math.min(2000, radius));
-  updateCam();
-},{passive:false});
-
-/* ====== UI: 우주선/소행성 버튼 ====== */
-document.getElementById('spawnShip').addEventListener('click', ()=>{
-  // 카메라 앞쪽에 소환, 초깃속도는 카메라 정면 방향
-  const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
-  const pos = camera.position.clone().add(dir.clone().multiplyScalar(12));
-  const vel = dir.clone().multiplyScalar(0.02); // 초깃속도
-  spawnSpaceship(pos, vel);
-});
-
-document.getElementById('delShip').addEventListener('click', ()=>{
-  for (let i = dynamicObjects.length-1; i>=0; i--){ if (dynamicObjects[i].type==='ship'){ scene.remove(dynamicObjects[i].mesh); dynamicObjects.splice(i,1); } }
-});
-
-document.getElementById('spawnAst').addEventListener('click', ()=>{
-  const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
-  const pos = camera.position.clone().add(dir.clone().multiplyScalar(12));
-  const vel = dir.clone().multiplyScalar((Math.random()*0.04)+0.005);
-  spawnAsteroid(pos, vel);
-});
-
-document.getElementById('clearObjs').addEventListener('click', ()=>{
-  dynamicObjects.forEach(o=> scene.remove(o.mesh)); dynamicObjects.length=0;
-});
-
-/* ====== 애니메이션/물리 루프 ====== */
-let last = performance.now();
-function tick(now){
-  const dtSec  = (now - last)/1000; last = now;
-  const dtDays = dtSec * timeScale; // 시뮬레이션에서 흐르는 '일' 단위
-
-  // 시뮬레이션 시간 갱신 (UTC)
-  simDate = new Date(simDate.getTime() + dtDays*24*3600*1000);
-  document.getElementById('startTime').textContent = simDate.toISOString().replace('T',' ').slice(0,19);
-
-  // 태양 자전(표현용)
-  const sunBody = bodies['태양'];
-  if (sunBody) sunBody.spin.rotation.y += dtDays * (2*Math.PI / 25.38);
-
-  for (const P of planetStates){
-    const {def, node, moons} = P;
-
-    // === 행성 공전 ===
-    if (node.orbitPeriodDays > 0) {
-      const sgn = node.retrogradeOrbit ? -1 : 1;
-      node.orbitAngle += sgn * dtDays * (2*Math.PI / node.orbitPeriodDays);
-      const ca = Math.cos(node.orbitAngle), sa = Math.sin(node.orbitAngle);
-      node.pivot.position.set(ca*node.orbitDist, 0, -sa*node.orbitDist);
-    }
-
-    // === 행성 자전 ===
-    const rotDays = Math.abs(node.rotPeriodHours)/24;
-    const rotSgn  = node.rotPeriodHours>=0 ? 1 : -1;
-    // 천왕성 자전 보정 — 뒤집힌 축으로 인해 y 대신 z 회전 적용
-    if (node.name==='천왕성'){
-      node.spin.rotation.z += rotSgn * dtDays * (2*Math.PI / rotDays);
-    } else {
-      if (rotDays>0) node.spin.rotation.y += rotSgn * dtDays * (2*Math.PI / rotDays);
-    } rotSgn * dtDays * (2*Math.PI / rotDays);
-
-    // === 위성(현재는 달만) ===
-    // (달은 이미 독립적으로 생성되어 있으므로 heavyBodies에 포함되어 움직임이 필요하면 확장)
-  }
-
-  // === 동적 객체 물리 업데이트 ===
-  for (let i=dynamicObjects.length-1;i>=0;i--){
-    const o = dynamicObjects[i];
-    // 중력 가속도
-    const acc = computeGravitationalAcceleration(o.pos);
-    // 간단한 오일러 적분(안정성이 낮음 — 시각적 용도)
-    o.vel.addScaledVector(acc, dtSec); // acc 단위: 유닛/초^2 (스케일 간단화)
-    o.pos.addScaledVector(o.vel, dtSec);
-    o.mesh.position.copy(o.pos);
-
-    // 충돌 검사: 행성/태양과의 거리 검사
-    for (const hb of heavyBodies){
-      const hp = hb.getWorldPosition();
-      const dist = hp.distanceTo(o.pos);
-      const thresh = (hb.mesh.geometry.parameters.radius || (hb.mesh.geometry.parameters.width||0))*1.2 + (o.radius || 0.5);
-      if (dist < thresh){
-        // 충돌 — 폭발 이펙트 후 제거
-        explodeAt(o.pos);
-        scene.remove(o.mesh);
-        dynamicObjects.splice(i,1);
-        break;
-      }
-    }
-  }
-
-  updateCam();
-  renderer.render(scene, camera);
-  requestAnimationFrame(tick);
 }
+
+// 토성 고리
+(function(){ const sat=bodies['토성']; if(sat){ const r=(3.6)*2; const g=new THREE.RingGeometry(r,r*1.6,128); g.rotateX(-Math.PI/2); const ring=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xd8cfae,roughness:.95,transparent:true,opacity:.6,side:THREE.DoubleSide})); sat.pivot.add(ring);} })();
+
+// 우주선/소행성
+function spawnSpaceship(pos,vel){ const g=new THREE.ConeGeometry(0.6,1.6,8); g.rotateX(Math.PI/2); const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0x88ffdd})); m.position.copy(pos); scene.add(m); const obj={type:'ship',mesh:m,pos:m.position.clone(),vel:vel.clone(),mass:0.01,radius:0.8}; dynamicObjects.push(obj); return obj; }
+function spawnAsteroid(pos,vel){ const s=Math.random()*0.6+0.2; const mesh=new THREE.Mesh(new THREE.DodecahedronGeometry(s,0), new THREE.MeshStandardMaterial({color:0x999999})); mesh.position.copy(pos); scene.add(mesh); const obj={type:'asteroid',mesh, pos:mesh.position.clone(), vel:vel.clone(), mass:Math.pow(s,3)*0.2, radius:s}; dynamicObjects.push(obj); return obj; }
+
+// 폭발
+function explodeAt(pos){ const g=new THREE.Group(); for(let i=0;i<18;i++){ const p=new THREE.Mesh(new THREE.SphereGeometry(0.06,6,6), new THREE.MeshBasicMaterial({color:0xffaa44})); p.position.copy(pos); p.userData.v=new THREE.Vector3((Math.random()-0.5)*2,(Math.random()-0.5)*2,(Math.random()-0.5)*2).multiplyScalar(0.6); g.add(p);} scene.add(g); const t0=performance.now(); const tid=setInterval(()=>{ const dt=(performance.now()-t0)/1000; g.children.forEach(ch=> ch.position.addScaledVector(ch.userData.v,0.04)); if(dt>1.5){ clearInterval(tid); scene.remove(g);} },50); }
+
+// 중력
+function computeGravitationalAcceleration(pos, ignoreBody=null){ const a=new THREE.Vector3(); for(const b of heavyBodies){ if(b===ignoreBody) continue; const bp=b.pivot.getWorldPosition(new THREE.Vector3()); const rvec=new THREE.Vector3().subVectors(bp,pos); const r2=Math.max(0.0001,rvec.lengthSq()); const accMag=G*b.mass / r2; a.addScaledVector(rvec.normalize(), accMag);} return a; }
+
+// 라그랑주 포인트 표시(근사)
+function updateLagrangeFor(planet){ // planet: body object
+  // clear old for planet
+  for(let i=lagrangeHelpers.length-1;i>=0;i--){ if(lagrangeHelpers[i].userData.parent===planet){ scene.remove(lagrangeHelpers[i]); lagrangeHelpers.splice(i,1);} }
+  const sun=bodies['태양']; if(!sun) return; const rp = planet.pivot.getWorldPosition(new THREE.Vector3()); const rs = sun.pivot.getWorldPosition(new THREE.Vector3()); const r = rp.distanceTo(rs); const mu = planet.mass / (sun.mass + planet.mass);
+  // L1,L2 distances (approx): r * (mu/3)^(1/3)
+  const d1 = r * Math.pow(mu/3,1/3); const d2 = r * Math.pow(mu/3,1/3);
+  // direction from planet to sun
+  const dir = new THREE.Vector3().subVectors(rs,rp).normalize();
+  const pL1 = rp.clone().addScaledVector(dir, d1); const pL2 = rp.clone().addScaledVector(dir, -d2);
+  // L4,L5: 60deg ahead/behind on planet orbit — approximate using local orbital plane
+  const up = new THREE.Vector3(0,1,0);
+  const toSun = new THREE.Vector3().subVectors(rp,rs).normalize();
+  const ort = new THREE.Vector3().crossVectors(up,toSun).normalize();
+  const pL4 = rp.clone().addScaledVector(toSun, Math.cos(Math.PI/3)*r).addScaledVector(ort, Math.sin(Math.PI/3)*r);
+  const pL5 = rp.clone().addScaledVector(toSun, Math.cos(Math.PI/3)*r).addScaledVector(ort, -Math.sin(Math.PI/3)*r);
+  const pts=[pL1,pL2,pL4,pL5];
+  for(const pt of pts){ const s=new THREE.Mesh(new THREE.SphereGeometry(0.18,8,8), new THREE.MeshBasicMaterial({color:0x66ffcc,transparent:true,opacity:0.9})); s.position.copy(pt); s.userData.parent=planet; scene.add(s); lagrangeHelpers.push(s); }
+}
+
+// UI bindings
+const speed=document.getElementById('speed'), speedNum=document.getElementById('speedNum'); function setRate(v){ timeScale=Math.max(0,Number(v)||0); speed.value=String(timeScale); speedNum.value=String(timeScale);} speed.addEventListener('input',e=>setRate(e.target.value)); speedNum.addEventListener('input',e=>setRate(e.target.value)); document.querySelectorAll('.btn[data-rate]').forEach(b=>b.addEventListener('click',()=>setRate(b.dataset.rate)));
+const focusSel=document.getElementById('focusSel'); function applyFocus(){ const v=focusSel.value; if(v==='자유(수동)') focusTarget=null; else focusTarget=(bodies[v]?bodies[v].pivot:null)||bodies['태양'].pivot; updateCam(); } focusSel.addEventListener('change',applyFocus);
+const axisToggle=document.getElementById('axisToggle'); axisToggle.addEventListener('change',()=>axisList.forEach(a=>a.visible=axisToggle.checked)); axisList.forEach(a=>a.visible=true);
+const gravToggle=document.getElementById('gravToggle'); let showGravityField=false; gravToggle.addEventListener('change',()=>{ showGravityField=gravToggle.checked; updateGravityHelpers(); });
+
+let gravHelpers=[];
+function updateGravityHelpers(){ gravHelpers.forEach(h=>scene.remove(h)); gravHelpers.length=0; if(!showGravityField) return; for(const b of heavyBodies){ const center=b.pivot.getWorldPosition(new THREE.Vector3()); const rvals=[2,4,8,12].map(x=>x*(b.mesh.geometry.parameters.radius||1)); for(const r of rvals){ const g=new THREE.RingGeometry(r-0.06,r+0.06,64); g.rotateX(-Math.PI/2); const m=new THREE.MeshBasicMaterial({color:0x66ccff,transparent:true,opacity:0.06,side:THREE.DoubleSide}); const ring=new THREE.Mesh(g,m); ring.position.copy(center); gravHelpers.push(ring); scene.add(ring); } // lagrange points
+    updateLagrangeFor(b);
+  } }
+
+// 마우스 카메라
+let dragging=false,px=0,py=0,button=0; app.addEventListener('mousedown',e=>{dragging=true;px=e.clientX;py=e.clientY;button=e.button}); window.addEventListener('mouseup',()=>dragging=false); app.addEventListener('contextmenu',e=>e.preventDefault());
+window.addEventListener('mousemove',e=>{ if(!dragging) return; const dx=e.clientX-px, dy=e.clientY-py; if(button===0){ theta-=dx*0.005; phi-=dy*0.005; const eps=0.001; phi=Math.max(eps,Math.min(Math.PI-eps,phi)); } else if(button===2){ if(!focusTarget){ const s=radius*0.0012; camera.updateMatrixWorld(); const fwd=new THREE.Vector3(); camera.getWorldDirection(fwd); const right=fwd.clone().cross(camera.up).normalize(); const up=camera.up.clone().normalize(); manualTarget.addScaledVector(right,-dx*s); manualTarget.addScaledVector(up,dy*s);} } px=e.clientX; py=e.clientY; updateCam(); });
+app.addEventListener('wheel',e=>{ e.preventDefault(); radius *= (1 + Math.sign(e.deltaY)*0.08); radius = Math.max(30, Math.min(5000, radius)); updateCam(); },{passive:false});
+
+// 버튼 actions
+document.getElementById('spawnShip').addEventListener('click', ()=>{ const dir=new THREE.Vector3(); camera.getWorldDirection(dir); const pos=camera.position.clone().add(dir.clone().multiplyScalar(12)); const vel=dir.clone().multiplyScalar(0.03); spawnSpaceship(pos,vel); });
+document.getElementById('delShip').addEventListener('click', ()=>{ for(let i=dynamicObjects.length-1;i>=0;i--){ if(dynamicObjects[i].type==='ship'){ scene.remove(dynamicObjects[i].mesh); dynamicObjects.splice(i,1); } } });
+document.getElementById('spawnAst').addEventListener('click', ()=>{ const dir=new THREE.Vector3(); camera.getWorldDirection(dir); const pos=camera.position.clone().add(dir.clone().multiplyScalar(12)); const vel=dir.clone().multiplyScalar((Math.random()*0.04)+0.005); spawnAsteroid(pos,vel); });
+document.getElementById('clearObjs').addEventListener('click', ()=>{ dynamicObjects.forEach(o=>scene.remove(o.mesh)); dynamicObjects.length=0; });
+
+// 케플러(E) 풀이(뉴턴) — returns E
+function solveKepler(M,e){ let E=M; for(let i=0;i<12;i++){ const f=E - e*Math.sin(E) - M; const fp=1 - e*Math.cos(E); E = E - f/fp; } return E; }
+
+// 애니메이션 루프 (행성 타원 궤도 업데이트 + 동적 객체 verlet)
+let last=performance.now(); function tick(now){ const dtSec=(now-last)/1000; last=now; const dtDays = dtSec * timeScale; simDate = new Date(simDate.getTime() + dtDays*24*3600*1000); document.getElementById('startTime').textContent = simDate.toISOString().replace('T',' ').slice(0,19);
+  // 태양 회전
+  const sunB=bodies['태양']; if(sunB) sunB.spin.rotation.y += dtDays * (2*Math.PI / defs[0].rotH);
+
+  // 행성 궤도 (케플러)
+  for(const ps of planetStates){ const def=ps.def; const node=ps.node; if(node.orbitPeriodDays>0){ const n = 2*Math.PI / node.orbitPeriodDays; node.meanAnomaly = (node.meanAnomaly + n*dtDays) % (2*Math.PI); const M=node.meanAnomaly; const e=node.ecc||0; const E=solveKepler(M,e); const a = node.semiMajor; const b = a*Math.sqrt(Math.max(0,1-e*e)); const x = a*(Math.cos(E)-e); const y = b*Math.sin(E); // focal correction: position relative to focus (sun at focus)
+      node.pivot.position.set(x,0,-y);
+    }
+    // 자전
+    const rotDays = Math.abs(node.rotPeriodHours)/24; const rotSgn = node.rotPeriodHours>=0?1:-1; if(rotDays>0){ if(Math.abs(def.tilt-90)<20) node.spin.rotation.z += rotSgn * dtDays * (2*Math.PI/rotDays); else node.spin.rotation.y += rotSgn * dtDays * (2*Math.PI/rotDays); }
+    // 위성 공전 (간단한 원형)
+    if(ps.moons && ps.moons.length>0){ for(const m of ps.moons){ if(m.orbitPeriodDays>0){ const nm = 2*Math.PI / m.orbitPeriodDays; m.orbitalAngle = (m.orbitalAngle + nm*dtDays) % (2*Math.PI); const ca=Math.cos(m.orbitalAngle), sa=Math.sin(m.orbitalAngle); m.pivot.position.set(ca*m.orbitDist,0,-sa*m.orbitDist); } } }
+  }
+
+  // 중력장 시각화 업데이트 위치
+  if(showGravityField) updateGravityHelpers();
+
+  // 동적 객체 물리: velocity verlet (더 안정적)
+  for(let i=dynamicObjects.length-1;i>=0;i--){ const o=dynamicObjects[i]; const r0=o.pos.clone(); const a0 = computeGravitationalAcceleration(o.pos); o.pos.addScaledVector(o.vel, dtSec).addScaledVector(a0, 0.5*dtSec*dtSec); const a1 = computeGravitationalAcceleration(o.pos); o.vel.addScaledVector(a0.add(a1).multiplyScalar(0.5), dtSec); o.mesh.position.copy(o.pos);
+      // 충돌 검사
+      for(const hb of heavyBodies){ const hp=hb.pivot.getWorldPosition(new THREE.Vector3()); const dist=hp.distanceTo(o.pos); const rbody = (hb.mesh.geometry.parameters.radius||hb.mesh.geometry.parameters.width||1); if(dist < rbody*1.1 + (o.radius||0.5)){ explodeAt(o.pos); scene.remove(o.mesh); dynamicObjects.splice(i,1); break; } }
+  }
+
+  updateCam(); renderer.render(scene,camera); requestAnimationFrame(tick); }
 requestAnimationFrame(tick);
 
-/* ====== 리사이즈 ====== */
-addEventListener('resize', ()=>{
-  const w = app.clientWidth, h = app.clientHeight;
-  renderer.setSize(w, h);
-  camera.aspect = w/h;
-  camera.updateProjectionMatrix();
-});
+window.addEventListener('resize', ()=>{ const w=app.clientWidth, h=app.clientHeight; renderer.setSize(w,h); camera.aspect=w/h; camera.updateProjectionMatrix(); });
 
-/* ====== 초기 뷰 설정 ====== */
-document.getElementById('speed').value = String(timeScale);
-document.getElementById('speedNum').value = String(timeScale);
-focusSel.value = '태양'; applyFocus();
-radius = 180; updateCam();
+// 초기 UI
+document.getElementById('speed').value = String(timeScale); document.getElementById('speedNum').value = String(timeScale); focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 
 </script>
 </body>
