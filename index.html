@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
-<title>태양계 (중력 시뮬레이션 + 우주선)</title>
+<title>Three.js 태양계 (중력 시뮬레이션 + 우주선)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
   html,body{height:100%;margin:0;background:#0b1020;color:#e9ecff;font:12px/1.4 system-ui}
@@ -157,6 +157,7 @@ function createBody({
 
   const spin = new THREE.Group();
   spin.rotation.z = THREE.MathUtils.degToRad(axialTiltDeg);
+  pivot.rotation.x = THREE.MathUtils.degToRad(orbitInc);
   pivot.add(spin);
 
   const mat = new THREE.MeshStandardMaterial({ color, roughness:.7, metalness:0.0 });
@@ -196,16 +197,16 @@ function createBody({
 /* ====== 사용자가 제공한 천체 데이터(원문 기초) ====== */
 // 입력값 기반으로 거리·크기·주기 등을 보기좋게 조정
 const defs = [
-  { name:'태양', size:10, dist:0, orbit:0, rotH:25.38, tilt:7.25, massScale:1000000 },
-  { name:'수성', size:0.9, dist:16, orbit:87.97, rotH:58.6462*24, tilt:0.01, massScale:0.055 },
-  { name:'금성', size:1.1, dist:22, orbit:224.7, rotH:243.0185*24 * -1, tilt:2.64, massScale:0.815 },
-  { name:'지구', size:1.2, dist:30, orbit:365.26, rotH:0.99726963*24, tilt:23.44, massScale:1 },
-  { name:'화성', size:0.9, dist:38, orbit:686.96, rotH:1.02595676*24, tilt:25.19, massScale:0.107 },
-  { name:'목성', size:4.0, dist:60, orbit:4333.29, rotH:0.41354*24, tilt:3.12, massScale:318 },
-  { name:'토성', size:3.6, dist:78, orbit:10756.2, rotH:0.44401*24, tilt:26.73, massScale:95 },
-  { name:'천왕성', size:2.9, dist:96, orbit:30707.49, rotH:0.71833*24 * -1, tilt:82.23, massScale:14 },
-  { name:'해왕성', size:2.8, dist:112, orbit:60223.35, rotH:0.67125*24, tilt:28.33, massScale:17 },
-  { name:'명왕성', size:0.5, dist:140, orbit:990623.31, rotH:6.3872*24 * -1, tilt:17.13, massScale:0.0022 }
+  { name:'태양', size:10, dist:0, orbit:0, rotH:25.38, tilt:7.25, ecc:0, orbitInc:0, massScale:1000000 },
+  { name:'수성', size:0.9, dist:16, orbit:87.969, rotH:58.65*24, tilt:0.0, ecc:0.2056, orbitInc:7.0, massScale:0.055 },
+  { name:'금성', size:1.1, dist:22, orbit:224.701, rotH:-243.0185*24, tilt:177.3, ecc:0.0068, orbitInc:3.39, massScale:0.815 },
+  { name:'지구', size:1.2, dist:30, orbit:365.256, rotH:0.997*24, tilt:23.44, ecc:0.0167, orbitInc:0.0, massScale:1 },
+  { name:'화성', size:0.9, dist:38, orbit:686.98, rotH:1.02595676*24, tilt:25.19, ecc:0.0934, orbitInc:1.85, massScale:0.107 },
+  { name:'목성', size:4.0, dist:60, orbit:4332.59, rotH:0.410*24, tilt:3.13, ecc:0.0489, orbitInc:1.305, massScale:318 },
+  { name:'토성', size:3.6, dist:78, orbit:10756.2, rotH:0.43*24, tilt:26.7, ecc:0.05565, orbitInc:2.484, massScale:95 },
+  { name:'천왕성', size:2.9, dist:96, orbit:30707.49, rotH:-0.72*24, tilt:97.77, ecc:0.0472, orbitInc:0.77, massScale:14 },
+  { name:'해왕성', size:2.8, dist:112, orbit:60223.35, rotH:0.67*24, tilt:28.32, ecc:0.0086, orbitInc:1.769, massScale:17 },
+  { name:'명왕성', size:0.5, dist:140, orbit:90560, rotH:-6.3872*24, tilt:122.53, ecc:0.2488, orbitInc:17.14, massScale:0.0022 }
 ];
 
 /* ====== 생성: 태양/행성/위성 (간단한 위성 추가) ====== */
@@ -213,7 +214,19 @@ const planetStates = [];
 for (const p of defs){
   const plan = createBody({ name:p.name, size:p.size, color:0xffffff, orbitDist:p.dist, orbitPeriodDays:p.orbit, rotPeriodHours:p.rotH, axialTiltDeg:p.tilt, massScale:p.massScale, showOrbit: p.dist>0 });
   // 색상 임의 분배
-  plan.mesh.material.color.setHSL(Math.random()*0.6+0.1, 0.6, 0.5);
+  // 행성 고유 색상 지정
+      switch(p.name){
+        case '태양': plan.mesh.material.color.set('#ffd54a'); break;
+        case '수성': plan.mesh.material.color.set('#555555'); break;
+        case '금성': plan.mesh.material.color.set('#fff7c4'); break;
+        case '지구': plan.mesh.material.color.set('#3a82ff'); break;
+        case '화성': plan.mesh.material.color.set('#d14b3a'); break;
+        case '목성': plan.mesh.material.color.set('#e6b56a'); break;
+        case '토성': plan.mesh.material.color.set('#d2b48c'); break;
+        case '천왕성': plan.mesh.material.color.set('#6ecff6'); break;
+        case '해왕성': plan.mesh.material.color.set('#264bff'); break;
+        case '명왕성': plan.mesh.material.color.set('#bbaea0'); break;
+      })*0.6+0.1, 0.6, 0.5);
   planetStates.push({def:p, node:plan, moons:[]});
 }
 
@@ -324,6 +337,8 @@ gravToggle.addEventListener('change', ()=>{ showGravityField = gravToggle.checke
 
 /* ====== 중력장 시각화(항성 중심으로 간단 표시) ====== */
 let gravHelpers = [];
+// 중력장 시각화: 태양 + 모든 행성
+let gravHelpers = [];
 function updateGravityHelpers(){
   // 기존 제거
   gravHelpers.forEach(h=> scene.remove(h)); gravHelpers.length=0;
@@ -431,7 +446,12 @@ function tick(now){
     // === 행성 자전 ===
     const rotDays = Math.abs(node.rotPeriodHours)/24;
     const rotSgn  = node.rotPeriodHours>=0 ? 1 : -1;
-    if (rotDays>0) node.spin.rotation.y += rotSgn * dtDays * (2*Math.PI / rotDays);
+    // 천왕성 자전 보정 — 뒤집힌 축으로 인해 y 대신 z 회전 적용
+    if (node.name==='천왕성'){
+      node.spin.rotation.z += rotSgn * dtDays * (2*Math.PI / rotDays);
+    } else {
+      if (rotDays>0) node.spin.rotation.y += rotSgn * dtDays * (2*Math.PI / rotDays);
+    } rotSgn * dtDays * (2*Math.PI / rotDays);
 
     // === 위성(현재는 달만) ===
     // (달은 이미 독립적으로 생성되어 있으므로 heavyBodies에 포함되어 움직임이 필요하면 확장)
