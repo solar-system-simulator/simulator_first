@@ -561,8 +561,25 @@ const neoOrbits = [];
 /* -------------------------------------------------
  * 동적 객체 (우주선, 소행성)
  * ------------------------------------------------- */
+
+// 📌 가장 가까운 우주선 찾기 (소행성 군 방향 계산용)
+function getNearestShip(pos) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const o of dynamicObjects) {
+    if (o.type !== 'ship') continue;
+    const d = o.pos.distanceTo(pos);
+    if (d < bestDist) {
+      bestDist = d;
+      best = o;
+    }
+  }
+  return best;
+}
+
 function spawnSpaceship(pos, vel) {
-  const geo = new THREE.ConeGeometry(0.6, 1.6, 8);
+  // 🔻 크기 50% 축소
+  const geo = new THREE.ConeGeometry(0.3, 0.8, 8);
   geo.rotateX(Math.PI / 2);
   const mat = new THREE.MeshStandardMaterial({ color: 0x88ffdd });
   const mesh = new THREE.Mesh(geo, mat);
@@ -575,10 +592,10 @@ function spawnSpaceship(pos, vel) {
     pos: mesh.position.clone(),
     vel: vel.clone(),
     mass: 0.01,
-    radius: 0.8,
+    radius: 0.4,   // 원래 0.8 → 절반
 
     // RL/자동 조향용 상태
-    fuel: 1.0,          // 0~1
+    fuel: 1.0,
     maxThrust: 0.06,
     lastFuelUsed: 0,
     prevGoalDist: null,
@@ -587,14 +604,17 @@ function spawnSpaceship(pos, vel) {
   };
   dynamicObjects.push(obj);
 
-  // 자동 조향 대상으로 기본 지정 (가장 최근)
+  // 자동 조향 대상으로 기본 지정 (가장 최근 우주선)
   autoShip = obj;
 
   return obj;
 }
 
+// 🔻 소행성 하나 (크기 50% 축소 버전)
 function spawnAsteroid(pos, vel) {
-  const s = Math.random() * 0.6 + 0.2;
+  const sBase = Math.random() * 0.6 + 0.2; // 0.2 ~ 0.8
+  const s = sBase * 0.5;                   // ➜ 절반 크기
+
   const geo = new THREE.DodecahedronGeometry(s, 0);
   const mat = new THREE.MeshStandardMaterial({ color: 0x999999 });
   const mesh = new THREE.Mesh(geo, mat);
@@ -612,6 +632,56 @@ function spawnAsteroid(pos, vel) {
   dynamicObjects.push(obj);
   return obj;
 }
+
+/**
+ * 🌑 소행성 군(spawnAsteroidSwarm)
+ * - centerPos: 클릭으로 선택한 중심 위치
+ * - ship: 기준이 될 우주선 (같은 y, 우주선 쪽 속도)
+ */
+function spawnAsteroidSwarm(centerPos, ship) {
+  const pos = centerPos.clone();
+
+  // 우주선이 있다면, 같은 y값으로 맞춰주기
+  let dirToShip = new THREE.Vector3(0, 0, 0);
+  if (ship) {
+    pos.y = ship.pos.y;
+    dirToShip.subVectors(ship.pos, pos);
+    if (dirToShip.lengthSq() > 0) dirToShip.normalize();
+  }
+
+  // 기본 속도 (우주선 쪽으로 약간)
+  const baseSpeed = ship ? 0.25 : 0.0;
+  const baseVel = dirToShip.clone().multiplyScalar(baseSpeed);
+
+  // 중앙 소행성
+  spawnAsteroid(pos, baseVel);
+
+  // 주변에 5~6개 정도 군집 생성
+  const count = 5 + Math.floor(Math.random() * 2); // 5 또는 6
+  for (let i = 0; i < count; i++) {
+    // xz 평면에서 중심 주변으로 작은 랜덤 오프셋
+    const offset = new THREE.Vector3(
+      (Math.random() - 0.5) * 4,   // -2 ~ 2
+      0,
+      (Math.random() - 0.5) * 4
+    );
+    const p = pos.clone().add(offset);
+
+    // 우주선 방향 + 약간의 랜덤을 섞은 속도
+    let v = baseVel.clone();
+    if (ship && baseSpeed > 0) {
+      const randomDir = new THREE.Vector3(
+        (Math.random() - 0.5) * 0.3,
+        (Math.random() - 0.5) * 0.05,
+        (Math.random() - 0.5) * 0.3
+      );
+      v.add(randomDir).multiplyScalar(0.8 + Math.random() * 0.6);
+    }
+
+    spawnAsteroid(p, v);
+  }
+}
+
 
 // 간단한 폭발 이펙트
 function explodeAt(pos) {
@@ -847,12 +917,17 @@ let button = 0;
 app.addEventListener('mousedown', (e) => {
   if (e.button === 0 && pendingSpawn) {
     const pos = getClickPositionOnPlane(e);
-    const vel = new THREE.Vector3(0, 0, 0);
 
     if (pendingSpawn.type === 'ship') {
+      // 우주선은 기존대로, 클릭 위치에 그냥 생성
+      const vel = new THREE.Vector3(0, 0, 0);
       spawnSpaceship(pos, vel);
+
     } else if (pendingSpawn.type === 'asteroid') {
-      spawnAsteroid(pos, vel);
+      // 🔥 소행성 군 생성
+      // - 가장 가까운 우주선을 기준으로 y값 맞추기 + 그 쪽으로 약한 속도
+      const nearestShip = getNearestShip(pos);
+      spawnAsteroidSwarm(pos, nearestShip);
     }
 
     pendingSpawn = null;
