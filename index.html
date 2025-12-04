@@ -1900,22 +1900,6 @@ function predictTrajectory(ship, policyType, steps=140, dt=0.7){
   }
   return pts;
 }
-let petsPathLine=null, sacPathLine=null;
-function showPredictedPath(ship, policyType){
-  const pts = predictTrajectory(ship, policyType);
-  const geo = new THREE.BufferGeometry().setFromPoints(pts);
-  const color = policyType==="PETS"?0xffdd33:0x33aaff;
-  const mat = new THREE.LineBasicMaterial({color,transparent:true,opacity:0.8});
-  const line = new THREE.Line(geo,mat);
-  scene.add(line);
-  if(policyType==="PETS"){
-    if(petsPathLine) scene.remove(petsPathLine);
-    petsPathLine=line;
-  }else{
-    if(sacPathLine) scene.remove(sacPathLine);
-    sacPathLine=line;
-  }
-}
 
 /* 에피소드 종료 처리 */
 function endEpisode(ship, success){
@@ -2146,6 +2130,7 @@ window.addEventListener("load", () => {
 </script>
 </body>
 </html>
+
 
 
 
