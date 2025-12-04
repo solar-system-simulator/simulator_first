@@ -1068,7 +1068,6 @@ function spawnWarpField() {
     life,
     maxLife: life,
     sphere,
-    ring,
   });
 }
 
@@ -1080,7 +1079,6 @@ function updateWarpFields(dtReal) {
 
     if (f.life <= 0) {
       scene.remove(f.sphere);
-      scene.remove(f.ring);
       warpFields.splice(i, 1);
       continue;
     }
@@ -2109,4 +2107,5 @@ updateCam();
 </script>
 </body>
 </html>
+
 
