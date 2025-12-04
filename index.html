@@ -322,6 +322,9 @@ function updateCam() {
 }
 updateCam();
 
+let petsShip = null;
+let sacShip = null;
+
 /* -------------------------------------------------
  * 시뮬레이션 시간 / 상수
  * ------------------------------------------------- */
@@ -759,6 +762,8 @@ function spawnSpaceshipSimple(pos, vel, policyType, color) {
     policyType,
     alive:true
   };
+  if (policyType === "PETS") petsShip = ship;
+  if (policyType === "SAC") sacShip = ship;
   dynamicObjects.push(ship);
   return ship;
 }
@@ -1824,6 +1829,32 @@ function stepSAC(ship,dt){
   document.getElementById('sacRew').textContent=ship.totalReward.toFixed(1);
 }
 
+function checkArrival() {
+  const target = document.getElementById("autoTarget").value;
+  const targetPos = bodies[target].pivot.getWorldPosition(new THREE.Vector3());
+  let arrived = false;
+
+  if (petsShip && !petsShip.arrived) {
+    const d = petsShip.pos.distanceTo(targetPos);
+    if (d < 2) {
+      petsShip.arrived = true;
+      showResultModal("PETS", target, true);
+      arrived = true;
+    }
+  }
+
+  if (sacShip && !sacShip.arrived) {
+    const d = sacShip.pos.distanceTo(targetPos);
+    if (d < 2) {
+      sacShip.arrived = true;
+      showResultModal("SAC", target, true);
+      arrived = true;
+    }
+  }
+
+  return arrived;
+}
+  
 /* ========== PETS/SAC 예측 경로 계산 ========== */
 function predictTrajectory(ship, policyType, steps=140, dt=0.7){
   const pts=[];
@@ -1933,7 +1964,7 @@ function solveKepler(M,e){
 
 
 /* -------------------------------------------------
- * 애니메이션 루프
+ * 시간 변환 시스템, [애니메이션]
  * ------------------------------------------------- */
 let last = performance.now();
 const hudBox = document.getElementById("hudBox");
@@ -2081,6 +2112,7 @@ function tick(now) {
       `(우주선 소환 → 예측 경로 확인 → PETS/SAC 선택)`;
   }
   updateCam();
+  checkArrival();
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
@@ -2107,5 +2139,6 @@ updateCam();
 </script>
 </body>
 </html>
+
 
 
