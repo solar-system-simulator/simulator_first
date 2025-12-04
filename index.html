@@ -771,6 +771,22 @@ function spawnSpaceshipSimple(pos, vel, policyType, color) {
   return ship;
 }
 
+function spawnBothShips() {
+  const origin = document.getElementById("autoOrigin").value;
+  const target = document.getElementById("autoTarget").value;
+
+  const originPos = bodies[origin].pivot.getWorldPosition(new THREE.Vector3());
+  const vel = new THREE.Vector3(0, 0, 0);   // 초기 속도
+
+  // PETS 우주선
+  spawnSpaceshipSimple(originPos, vel, "PETS", 0xffdd33);
+
+  // SAC 우주선
+  spawnSpaceshipSimple(originPos, vel, "SAC", 0x33aaff);
+
+  console.log("우주선 두 개 소환 완료");
+}
+
 function spawnAsteroid(pos, vel) {
   const sBase = Math.random() * 0.6 + 0.2;
   const s = sBase * 0.5;
@@ -1263,33 +1279,6 @@ function getObservation(ship) {
     warpInfluence: warpInfo.influence, // 0~1
     warpDir: warpInfo.dir              // 역장 중심 방향
   };
-}
-
-function spawnSpaceshipSimple(pos, vel, policyType, color) {
-  const geo = new THREE.ConeGeometry(0.3, 0.8, 8);
-  geo.rotateX(Math.PI / 2);
-  const mat = new THREE.MeshStandardMaterial({ color });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.copy(pos);
-  scene.add(mesh);
-  const ship = {
-    type:'ship',
-    mesh,
-    pos: mesh.position.clone(),
-    vel: vel.clone(),
-    mass: 0.05,
-    radius: 0.4,
-    fuel: 1.0,
-    maxThrust: 0.22,   // 출력 크게 ↑
-    lastFuelUsed:0,
-    prevGoalDist:null,
-    totalReward:0,
-    collided:false,
-    policyType,
-    alive:true
-  };
-  dynamicObjects.push(ship);
-  return ship;
 }
 
 /* -------------------------------------------------
@@ -2106,7 +2095,7 @@ function tick(now) {
 requestAnimationFrame(tick);
 
 /* -------------------------------------------------
- * 리사이즈 대응 & 초기 UI 설정
+ * 리사이즈 대응 & 초기 UI 설정, // === 버튼 이벤트 연결 (여기에 넣기) ===
  * ------------------------------------------------- */
 window.addEventListener('resize', () => {
   const w = app.clientWidth;
@@ -2123,13 +2112,18 @@ applyFocus();
 radius = 200;
 updateCam();
 
+document.getElementById("spawnShip").addEventListener("click", () => {
+  spawnBothShips();
+});
+
+// === 애니메이션 시작 ===
 window.addEventListener("load", () => {
   requestAnimationFrame(tick);
-});
   
 </script>
 </body>
 </html>
+
 
 
 
