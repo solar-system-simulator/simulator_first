@@ -1144,6 +1144,10 @@ function predictTrajectory(ship, policyType, steps = 220, dtSec = 0.35) {
   // 어떤 행성을 목표로 하는지
   const targetName = document.getElementById("autoTarget").value;
   const targetBody = bodies[targetName];
+  const initialGAA = getGravityAssistOpportunity(ship, targetBody.name);
+  let isExecutingGA = !!initialGAA;
+  let gaFlybyPos = initialGAA ? initialGAA.body.pivot.getWorldPosition(new THREE.Vector3())
+      .addScaledVector(initialGAA.approachVector, initialGAA.flybyRadius) : null;
 
   // 예측용 “유령 시간”: 몇 일 후인지
   let ghostDays = 0;
@@ -1203,6 +1207,17 @@ function predictTrajectory(ship, policyType, steps = 220, dtSec = 0.35) {
       if (isStableLPointNearby) {
          dir.addScaledVector(lgrgDir, 0.5);
       }
+      const currentTargetPos = getFuturePlanetPos(targetBody, ghostDays);
+    
+      // GA 실행 중이라면 임시 목표를 GA 지점으로 설정
+      let effectiveTargetPos = currentTargetPos;
+      if (isExecutingGA && gaFlybyPos) {
+      // 임시 목표(GA 플라이바이 지점)에 가까워지면 GA 완료로 간주하고 주 목표로 전환
+      if (pos.distanceTo(gaFlybyPos) < 5) {
+            isExecutingGA = false;
+      } else {
+            effectiveTargetPos = gaFlybyPos;
+        }
     }
 
     // ★ 더 이상 y 성분을 인위적으로 줄이지 않음 → 완전한 3D
@@ -1220,6 +1235,26 @@ function predictTrajectory(ship, policyType, steps = 220, dtSec = 0.35) {
       fuel = Math.max(0, fuel - fuelUsed);
     }
 
+    // 적응형 추력 비율 계산
+    const baseFuelRatio = policyType === "PETS" ? 0.7 : 0.5;
+    let fuelRatio;
+    if (dist > 50) {
+        fuelRatio = baseFuelRatio;
+    } else if (dist > 10) {
+        fuelRatio = baseFuelRatio * (0.2 + 0.8 * (dist - 10) / 40);
+    } else {
+        fuelRatio = baseFuelRatio * 0.15;
+    }
+      
+    // 간단한 추력/연료 모델
+    const thrustOn  = fuel > 0 && dist > 1.0;
+    if (thrustOn) {
+      const thrustMag = ship.maxThrust * fuelRatio; 
+      vel.addScaledVector(dir, thrustMag * dtSec);
+      const fuelUsed = fuelRatio * dtSec * 0.6; 
+      fuel = Math.max(0, fuel - fuelUsed);
+    }
+      
     // 중력 적분
     vel.addScaledVector(g, dtSec);
     pos.addScaledVector(vel, dtSec);
@@ -1391,7 +1426,7 @@ document.getElementById('spawnShip').addEventListener('click',()=>{
   const earth = bodies['지구'];
   if(earth){
     basePos = earth.pivot.getWorldPosition(new THREE.Vector3())
-      .add(new THREE.Vector3(4,0,0));
+      .add(new THREE.Vector3(10,0,0));
   }else{
     basePos = new THREE.Vector3(30,0,0);
   }
@@ -1735,4 +1770,5 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
+
 
