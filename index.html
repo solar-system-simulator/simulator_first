@@ -1587,21 +1587,20 @@ function getFuturePlanetPos(body, deltaDays) {
 
 // 🔹 개선된 예측 궤도 생성: 시간에 따라 목표도 움직이도록 + 충돌 회피 고려
 function predictTrajectoryWithAvoidance(ship, targetName) {
-  const steps = 300;
-  const dtSec = 3 * 3600;      // 3시간 단위로 진행
+  const steps = 500;
+  const dtSec = 300;      // 5분 단위로 진행
   const dtDay = dtSec / 86400; // 일 단위 변환
 
   const ghostShip = {
     pos: ship.pos.clone(),
-    vel: ship.vel.clone(),
-    alive: true
+    vel: ship.vel.clone()
   };
 
   const pathPts = [];
   let t = 0;
 
   const targetBody = bodies[targetName];
-  const targetR = targetBody?.mesh?.geometry?.parameters?.radius || 1;
+  const targetR = targetBody?.mesh?.geometry?.parameters?.radius || 3;
 
   for (let i = 0; i < steps; i++) {
     const p = ghostShip.pos.clone();
@@ -1627,7 +1626,27 @@ function predictTrajectoryWithAvoidance(ship, targetName) {
     ghostShip.pos.addScaledVector(ghostShip.vel, dtSec);
 
     const dist = ghostShip.pos.distanceTo(futureTargetPos);
-    if (dist < targetR * 4) break;
+    if (dist < targetR * 3) break;
+
+        // ---- 방향 ----
+    let dir = toTarget.clone().normalize();
+
+    // ---- 회피 벡터 약하게 ----
+    const avoid = computeAvoidanceVector(ghost.pos);
+    if (avoid.lengthSq() > 1e-6) {
+      dir.addScaledVector(avoid.normalize(), 0.2);
+      dir.normalize();
+    }
+
+    // ---- 추력 ----
+    const thrust = ship.maxThrust * 0.6;
+    ghost.vel.addScaledVector(dir, thrust * dtSec);
+
+    // ---- 중력 (수정 핵심) ----
+    const g = computeGravitationalAcceleration(ghost.pos);  // 🔥 핵심
+    ghost.vel.addScaledVector(g, dtSec);
+
+    ghost.pos.addScaledVector(ghost.vel, dtSec);
   }
 
   return pathPts;
@@ -1826,3 +1845,4 @@ requestAnimationFrame(tick);
 
 </body>
 </html>
+
