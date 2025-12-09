@@ -5,13 +5,14 @@
   <title>태양계 + PETS / SAC RL</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
+    /* 전체 화면을 캔버스로 쓰기 위한 기본 스타일 */
     html, body {
       height: 100%;
       margin: 0;
       background: #051022;
       color: #e9ecff;
       font: 13px/1.45 system-ui;
-      overflow: hidden;
+      overflow: hidden; /* 스크롤 숨김 (우주 전체 보기용) */
     }
     #app {
       position: fixed;
@@ -22,6 +23,8 @@
       width: 100%;
       height: 100%;
     }
+
+    /* 상단 왼쪽 UI 패널 */
     .ui {
       position: fixed;
       left: 12px;
@@ -66,6 +69,8 @@
       font-size: 11px;
       opacity: .85;
     }
+
+    /* 오른쪽 중간 HUD (PETS/SAC 상태 표시) */
     .hud {
       position: fixed;
       right: 10px;
@@ -79,7 +84,8 @@
       line-height: 1.3;
       z-index: 10;
     }
-    /* 결과 모달 오버레이 */
+
+    /* 비행 결과 모달 오버레이 */
     #resultOverlay {
       position: fixed;
       inset: 0;
@@ -108,6 +114,8 @@
       margin: 4px 0 12px;
       color: #ffe066;
     }
+
+    /* 오른쪽 아래 결과 로그 창 */
     #sideLog {
       position: fixed;
       right: 10px;
@@ -119,7 +127,8 @@
       max-width: 260px;
       max-height: 30vh;
       overflow-y: auto;
-      z-index: 10;ㅍ    }
+      z-index: 10;
+    }
     #sideLog h3 {
       margin: 0 0 4px;
       font-size: 12px;
@@ -130,12 +139,13 @@
 <body>
 <div id="app"></div>
 
-<!-- UI 패널 -->
+<!-- ===== UI 패널: 시뮬레이션 속도 / 포커스 / 우주선 / 소행성 / RL 타겟 ===== -->
 <div class="ui">
   <div class="row">
     <label for="speed">속도 (일/초)</label>
     <input id="speed" type="range" min="0" max="500" step="0.1" value="0.3" />
     <input id="speedNum" type="text" value="0.3" />
+    <!-- 프리셋 배속 버튼 -->
     <button class="btn" data-rate="1">1×</button>
     <button class="btn" data-rate="10">10×</button>
     <button class="btn" data-rate="100">100×</button>
@@ -168,13 +178,14 @@
   </div>
 
   <div class="row">
+    <!-- 우주선 / 소행성 / 역장 생성 / 모두 삭제 -->
     <button class="btn" id="spawnShip">우주선 소환 (PETS/SAC 비교)</button>
     <button class="btn" id="spawnAst">소행성 군 소환</button>
     <button class="btn" id="spawnField">역장 생성</button>
     <button class="btn" id="clearObjs">모두 삭제</button>
   </div>
 
-  <!-- RL 관련 UI -->
+  <!-- RL 목표 행성 선택 (지구, 달, 목성 등) -->
   <div class="row">
     <label for="autoTarget">RL 목표</label>
     <select id="autoTarget">
@@ -192,6 +203,7 @@
     </select>
   </div>
 
+  <!-- PETS / SAC 각각 on/off 및 연료, 리워드 표시 -->
   <div class="row small">
     <label><input id="petsEnable" type="checkbox" checked /> PETS</label>
     <label><input id="sacEnable" type="checkbox" checked /> SAC</label>
@@ -201,7 +213,7 @@
     </span>
   </div>
 
-  <!-- PETS vs SAC 선택 버튼 -->
+  <!-- PETS vs SAC 중 어떤 정책을 실제 비행에 쓸지 선택 -->
   <div class="row" id="choiceRow" style="display:none;">
     <button class="btn" id="choosePETS">PETS 사용</button>
     <button class="btn" id="chooseSAC">SAC 사용</button>
@@ -216,13 +228,14 @@
   </div>
 </div>
 
+<!-- 우측 HUD -->
 <div class="hud" id="hudBox">
   PETS / SAC 상태<br>
   --------------------------<br>
   초기화 중...
 </div>
 
-<!-- 결과 모달 -->
+<!-- 비행 결과 모달 -->
 <div id="resultOverlay">
   <div id="resultModal">
     <h2>비행 결과</h2>
@@ -232,45 +245,48 @@
   </div>
 </div>
 
-<!-- 결과 로그 -->
+<!-- 결과 로그 영역 -->
 <div id="sideLog">
   <h3>결과 로그</h3>
   <div id="logContent"></div>
 </div>
 
+<!-- Three.js 라이브러리 -->
 <script src="./three.min.js"></script>
-<!-- (No changes to HTML/CSS, showing only the <script> content with reorganized functions) -->
-<script src="./three.min.js"></script>
+
 <script>
 // ========== Basic Three.js Setup ==========
+// 렌더러 · 씬 · 카메라 기본 셋업
 
 const app = document.getElementById('app');
+
+// 안티앨리어싱 켠 WebGLRenderer 생성
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(app.clientWidth, app.clientHeight);
-renderer.setClearColor(0x051022, 1);
+renderer.setClearColor(0x051022, 1); // 배경색(우주스러운 남색)
 app.appendChild(renderer.domElement);
 
+// 메인 씬 & 카메라 생성
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(
-  60,
-  app.clientWidth / app.clientHeight,
+  60,                               // 시야각
+  app.clientWidth / app.clientHeight, // 종횡비
   0.1,
   20000
 );
 
-// Camera orbit parameters
-let radius = 260;
-let phi    = THREE.MathUtils.degToRad(28);
-let theta  = THREE.MathUtils.degToRad(40);
-const manualTarget = new THREE.Vector3(0, 0, 0);
-let focusTarget = null;
+// 카메라의 구면좌표 (태양계를 공전하듯 도는 느낌)
+let radius = 260;                               // 카메라 거리
+let phi    = THREE.MathUtils.degToRad(28);      // 위도
+let theta  = THREE.MathUtils.degToRad(40);      // 경도
+const manualTarget = new THREE.Vector3(0, 0, 0); // 자유 모드일 때 카메라가 보는 지점
+let focusTarget = null;                          // 특정 행성에 포커스할 때 사용
 
-// =================================================================
-// Utilities (Axis Creation, Camera Controls)
-// =================================================================
+// ================= 공통 유틸 함수들 =================
 
 function mkAxis(len) {
+  // 행성의 자전축(실린더) 생성
   const geo = new THREE.CylinderGeometry(0.04, 0.04, len, 8);
   const mat = new THREE.MeshBasicMaterial({
     color: 0xffffff,
@@ -282,12 +298,14 @@ function mkAxis(len) {
   return cyl;
 }
 
+// 카메라가 바라볼 타겟 위치(포커스 행성 or 수동 타겟)
 function getTarget() {
   return focusTarget
     ? focusTarget.getWorldPosition(new THREE.Vector3())
     : manualTarget;
 }
 
+// 구면좌표(radius, phi, theta)로 카메라 위치 계산
 function updateCam() {
   const t = getTarget();
   const x = t.x + radius * Math.sin(phi) * Math.cos(theta);
@@ -300,23 +318,30 @@ updateCam();
 
 // ========== Time / Constants ==========
 
+// 시뮬레이션 가상 날짜 (초기값)
 let simDate = new Date('2025-01-01T00:00:00Z');
+// timeScale: 1이면 '1초에 1일', 10이면 '1초에 10일' 같은 개념
 let timeScale = 0.3;
+
+// G: 중력 상수(시뮬용 축소), MAX_ACC: 중력 가속도 상한
 const G = 5e-6;
 const MAX_ACC = 0.3;
 
+// 조명: 전체 Ambient + 태양에서 나오는 PointLight
 scene.add(new THREE.AmbientLight(0xffffff, 0.35));
 const sunLight = new THREE.PointLight(0xffffff, 2.2, 0, 2);
 scene.add(sunLight);
 
-const bodies          = {};
-const heavyBodies     = [];
-const axisList        = [];
-const dynamicObjects  = [];
-const lagrangeHelpers = [];
-const warpFields      = [];   // Warp fields (distortion fields)
-const thrustParticles = [];
+// 행성, 동역학 객체, 축, 라그랑주·역장 등 저장용 배열/객체
+const bodies          = {};   // 이름 → 천체 정보
+const heavyBodies     = [];   // 중력 계산 대상(행성/태양)
+const axisList        = [];   // 자전축 Mesh들
+const dynamicObjects  = [];   // 우주선/소행성 등 움직이는 객체
+const lagrangeHelpers = [];   // (사용 가능) 라그랑주 포인트 표시용
+const warpFields      = [];   // 역장(왜곡 필드)
+const thrustParticles = [];   // 엔진 화염 파티클
 
+// 전역 스케일 (필요시 거리를 축소/확대하기 위한 상수)
 const SIZE = 1;
 const DIST = 1;
 
@@ -324,38 +349,44 @@ const DIST = 1;
 // Celestial Body Creation and Orbits
 // =================================================================
 
-// Function to create a celestial body
+// 천체(행성·달 등)를 생성하는 공통 함수
 function createBody({
   name,
-  parent          = scene,
+  parent          = scene, // 어느 그룹에 붙을지(보통 태양계 전체 or 행성 pivot)
   size            = 1,
   color           = 0xffffff,
   orbitDist       = 0,
-  orbitPeriodDays = 0,
-  rotPeriodHours  = 24,
-  axialTiltDeg    = 0,
-  ecc             = 0,
-  orbitInc        = 0,
+  orbitPeriodDays = 0,     // 공전 주기(일)
+  rotPeriodHours  = 24,    // 자전 주기(시간)
+  axialTiltDeg    = 0,     // 자전축 기울기
+  ecc             = 0,     // 궤도 이심률
+  orbitInc        = 0,     // 궤도 경사각
   massScale       = 1,
 } = {}) {
+  // pivot: 궤도 평면 기준 회전축(공전 회전은 pivot에)
   const pivot = new THREE.Group();
   parent.add(pivot);
+  // 궤도 경사 적용
   pivot.rotation.x = THREE.MathUtils.degToRad(orbitInc || 0);
 
+  // spin: 자전축 그룹 (기울기 포함)
   const spin = new THREE.Group();
   spin.rotation.z = THREE.MathUtils.degToRad(axialTiltDeg || 0);
   pivot.add(spin);
 
+  // 실제 구(Sphere) 메쉬
   const mesh = new THREE.Mesh(
     new THREE.SphereGeometry(size * SIZE, 32, 32),
     new THREE.MeshStandardMaterial({ color, roughness: 0.85 })
   );
   spin.add(mesh);
 
+  // 자전축 표시용 Cylinder
   const axis = mkAxis(size * 3);
   spin.add(axis);
   axisList.push(axis);
 
+  // 질량은 단순히 구의 부피(size^3)에 massScale 적용
   const mass = Math.max(1e-6, Math.pow(size, 3) * massScale);
 
   const body = {
@@ -369,29 +400,30 @@ function createBody({
     mass,
     ecc,
     orbitInc,
-    meanAnomaly: Math.random() * Math.PI * 2,
-    semiMajor: orbitDist * DIST,
+    meanAnomaly: Math.random() * Math.PI * 2, // 초기 위치(무작위 위상)
+    semiMajor: orbitDist * DIST,              // 타원 궤도 장반경
   };
 
   bodies[name] = body;
-  heavyBodies.push(body);
+  heavyBodies.push(body); // 중력계산 대상에 등록
   return body;
 }
 
-// Planet and moon data
+// 기본 행성/태양 정의
 const defs = [
-  { name: '태양',   size: 10, dist: 0,    orbit: 0,         rotH: 25.38,           tilt: 7.25,  ecc: 0,          orbitInc: 0,    massScale: 1e6,   color: '#ffd54a' },
-  { name: '수성',   size: 0.9, dist: 16,   orbit: 87.969,    rotH: 58.6462 * 24,    tilt: 0.01,  ecc: 0.205630,   orbitInc: 7.005, massScale: 0.055, color: '#555555' },
-  { name: '금성',   size: 1.1, dist: 22,   orbit: 224.701,   rotH: -243.0185 * 24,  tilt: 177.36, ecc: 0.006772,   orbitInc: 3.394, massScale: 0.815, color: '#fff7c4' },
-  { name: '지구',   size: 1.2, dist: 30,   orbit: 365.256,   rotH: 0.99726963 * 24, tilt: 23.44,  ecc: 0.01671123, orbitInc: 0.0,   massScale: 1,     color: '#3a82ff' },
-  { name: '화성',   size: 0.9, dist: 38,   orbit: 686.98,    rotH: 1.02595676 * 24, tilt: 25.19,  ecc: 0.0933941,  orbitInc: 1.85,  massScale: 0.107, color: '#d14b3a' },
-  { name: '목성',   size: 4.0, dist: 60,   orbit: 4332.59,   rotH: 0.41354 * 24,    tilt: 3.13,   ecc: 0.04839266, orbitInc: 1.305, massScale: 318,   color: '#e6b56a' },
-  { name: '토성',   size: 3.6, dist: 78,   orbit: 10756.2,   rotH: 0.44401 * 24,    tilt: 26.73,  ecc: 0.055723,   orbitInc: 2.485, massScale: 95,    color: '#d2b48c' },
-  { name: '천왕성', size: 2.9, dist: 96,   orbit: 30707.49,  rotH: -0.71833 * 24,  tilt: 97.77,  ecc: 0.04565,    orbitInc: 0.77,  massScale: 14,    color: '#6ecff6' },
-  { name: '해왕성', size: 2.8, dist: 112,  orbit: 60223.35,  rotH: 0.67125 * 24,   tilt: 28.32,  ecc: 0.00859048, orbitInc: 1.769, massScale: 17,    color: '#264bff' },
-  { name: '명왕성', size: 0.5, dist: 140,  orbit: 90560,     rotH: -6.3872 * 24,   tilt: 122.53, ecc: 0.24883,    orbitInc: 17.14, massScale: 0.0022, color: '#bbaea0' },
+  { name: '태양',   size: 10,  dist: 0,   orbit: 0,         rotH: 25.38,           tilt: 7.25,   ecc: 0,          orbitInc: 0,    massScale: 1e6,   color: '#ffd54a' },
+  { name: '수성',   size: 0.9, dist: 16,  orbit: 87.969,    rotH: 58.6462 * 24,    tilt: 0.01,   ecc: 0.205630,   orbitInc: 7.005, massScale: 0.055, color: '#555555' },
+  { name: '금성',   size: 1.1, dist: 22,  orbit: 224.701,   rotH: -243.0185 * 24,  tilt: 177.36, ecc: 0.006772,   orbitInc: 3.394, massScale: 0.815, color: '#fff7c4' },
+  { name: '지구',   size: 1.2, dist: 30,  orbit: 365.256,   rotH: 0.99726963 * 24, tilt: 23.44,  ecc: 0.01671123, orbitInc: 0.0,   massScale: 1,     color: '#3a82ff' },
+  { name: '화성',   size: 0.9, dist: 38,  orbit: 686.98,    rotH: 1.02595676 * 24, tilt: 25.19,  ecc: 0.0933941,  orbitInc: 1.85,  massScale: 0.107, color: '#d14b3a' },
+  { name: '목성',   size: 4.0, dist: 60,  orbit: 4332.59,   rotH: 0.41354 * 24,    tilt: 3.13,   ecc: 0.04839266, orbitInc: 1.305, massScale: 318,   color: '#e6b56a' },
+  { name: '토성',   size: 3.6, dist: 78,  orbit: 10756.2,   rotH: 0.44401 * 24,    tilt: 26.73,  ecc: 0.055723,   orbitInc: 2.485, massScale: 95,    color: '#d2b48c' },
+  { name: '천왕성', size: 2.9, dist: 96,  orbit: 30707.49,  rotH: -0.71833 * 24,   tilt: 97.77,  ecc: 0.04565,    orbitInc: 0.77,  massScale: 14,    color: '#6ecff6' },
+  { name: '해왕성', size: 2.8, dist: 112, orbit: 60223.35,  rotH: 0.67125 * 24,    tilt: 28.32,  ecc: 0.00859048, orbitInc: 1.769, massScale: 17,    color: '#264bff' },
+  { name: '명왕성', size: 0.5, dist: 140, orbit: 90560,     rotH: -6.3872 * 24,    tilt: 122.53, ecc: 0.24883,    orbitInc: 17.14, massScale: 0.0022,color: '#bbaea0' },
 ];
 
+// 행성 상태(위성 포함) 관리용 배열
 const planetStates = [];
 for (const p of defs) {
   const body = createBody({
@@ -409,21 +441,24 @@ for (const p of defs) {
   planetStates.push({ def: p, node: body, moons: [] });
 }
 
-// Function to create orbit line
+// 특정 궤도(장반경, 이심률 등)로 궤도 라인(타원)을 그리는 함수
 function createOrbitLine({a, e, iDeg, omegaDeg, OmegaDeg, color=0xffffff, opacity=0.25, segments=360}) {
   const pts = [];
   const iRad     = THREE.MathUtils.degToRad(iDeg || 0);
   const omegaRad = THREE.MathUtils.degToRad(omegaDeg || 0);
   const OmegaRad = THREE.MathUtils.degToRad(OmegaDeg || 0);
+
   for (let k = 0; k <= segments; k++) {
-    const nu = (2 * Math.PI * k) / segments;
-    const r = (a * (1 - e * e)) / (1 + e * Math.cos(nu));
+    const nu = (2 * Math.PI * k) / segments;            // 진각(현재 각도)
+    const r = (a * (1 - e * e)) / (1 + e * Math.cos(nu)); // 타원 궤도 방정식
     const v = new THREE.Vector3(r * Math.cos(nu), 0, r * Math.sin(nu));
+    // 궤도 경사/승교점/근일점 방향 회전 적용
     v.applyAxisAngle(new THREE.Vector3(0, 1, 0), omegaRad);
     v.applyAxisAngle(new THREE.Vector3(1, 0, 0), iRad);
     v.applyAxisAngle(new THREE.Vector3(0, 1, 0), OmegaRad);
     pts.push(v);
   }
+
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
   const mat = new THREE.LineBasicMaterial({color, transparent: true, opacity});
   const line = new THREE.Line(geo, mat);
@@ -431,13 +466,14 @@ function createOrbitLine({a, e, iDeg, omegaDeg, OmegaDeg, color=0xffffff, opacit
   return line;
 }
 
-// Draw orbits for each planet
+// 각 행성에 대해 궤도 라인 생성
 for (const ps of planetStates) {
   const node = ps.node;
-  if (node.orbitPeriodDays <= 0) continue;
+  if (node.orbitPeriodDays <= 0) continue; // 태양 등 공전 없는 경우 스킵
+
   const name = ps.def.name;
   let col = 0x444c66;
-  if (name === '수성') col = 0xaaaaaa;
+  if (name === '수성')      col = 0xaaaaaa;
   else if (name === '금성') col = 0xffc966;
   else if (name === '지구') col = 0x3a82ff;
   else if (name === '화성') col = 0xff5533;
@@ -459,14 +495,15 @@ for (const ps of planetStates) {
   });
 }
 
-// Moons and Saturn's rings
+// ================= 달 및 주요 위성, 토성 고리 =================
+
+// 지구의 달 생성
 (() => {
-  // Earth's moon
   const earth = bodies['지구'];
   if (!earth) return;
   const moon = createBody({
     name: '달',
-    parent: earth.pivot,
+    parent: earth.pivot, // 지구를 도는 위성
     size: 0.35,
     orbitDist: 4,
     orbitPeriodDays: 27.322,
@@ -484,6 +521,7 @@ for (const ps of planetStates) {
   });
 })();
 
+// 목성/토성/천왕성/해왕성/명왕성의 대표적인 위성 목록
 const majorMoons = {
   '목성': [
     ['이오',      7.0,   1.769,  '#ffd1a8'],
@@ -507,7 +545,7 @@ const majorMoons = {
   ],
 };
 
-// Create moons for Jupiter, Saturn, etc.
+// 각 행성에 위성을 생성하여 planetStates.moons에 추가
 for (const ps of planetStates) {
   const name   = ps.def.name;
   const planet = ps.node;
@@ -522,7 +560,7 @@ for (const ps of planetStates) {
       color: mColor,
       orbitDist: mDist,
       orbitPeriodDays: mPeriod,
-      rotPeriodHours: mPeriod * 24,
+      rotPeriodHours: mPeriod * 24, // 동주기 자전
       massScale: 0.01,
     });
     ps.moons.push({
@@ -534,13 +572,13 @@ for (const ps of planetStates) {
   }
 }
 
-// Saturn's rings
+// 토성 고리 생성
 (() => {
   const saturn = bodies['토성'];
   if (!saturn) return;
   const r = 3.6 * 2;
   const geo = new THREE.RingGeometry(r, r * 1.6, 128);
-  geo.rotateX(-Math.PI / 2);
+  geo.rotateX(-Math.PI / 2); // XY 평면이 되도록 회전
   const mat = new THREE.MeshStandardMaterial({
     color: 0xd8cfae,
     roughness: 0.95,
@@ -551,27 +589,30 @@ for (const ps of planetStates) {
   const ring = new THREE.Mesh(geo, mat);
   saturn.pivot.add(ring);
 })();
-
+<!-- ====== 2부 JS: 물리 연산 & 관측값 계산 & 스폰 ====== -->
+<script>
 // =================================================================
 // Physics & Observation Functions
 // =================================================================
 
-// Compute raw gravitational acceleration (planets only)
+// 행성/태양에 의한 순수 중력가속도 계산 (warp field 적용 X)
 function computeGravitationalAccelerationRaw(pos) {
   const acc = new THREE.Vector3();
   for (const b of heavyBodies) {
     const bp = b.pivot.getWorldPosition(new THREE.Vector3());
-    const rVec = new THREE.Vector3().subVectors(bp, pos);
+    const rVec = new THREE.Vector3().subVectors(bp, pos); // pos→행성 방향
     const r = rVec.length();
     if (r === 0) continue;
 
     const baseR = b.mesh.geometry.parameters.radius || 1;
     let maxRangeMul = 16;
     let effMass = b.mass;
+
+    // 태양은 너무 세므로 인위적으로 약하게(scale down)
     if (b.name === '태양') effMass *= 0.0002;
 
     const rMax = baseR * maxRangeMul;
-    if (r > rMax) continue;
+    if (r > rMax) continue; // 너무 멀면 영향 무시
 
     const r2 = Math.max(100, r * r);
     let accMag = (G * effMass) / r2;
@@ -582,7 +623,7 @@ function computeGravitationalAccelerationRaw(pos) {
   return acc;
 }
 
-// Compute gravitational acceleration (with warp effects)
+// warp field(역장)까지 반영한 중력가속도 계산
 function computeGravitationalAcceleration(pos) {
   const acc = new THREE.Vector3();
   for (const b of heavyBodies) {
@@ -605,10 +646,11 @@ function computeGravitationalAcceleration(pos) {
 
     acc.addScaledVector(rVec.normalize(), accMag);
   }
+  // warp field가 있으면 여기서 추가로 가속도 왜곡
   return applyWarpFieldsToAcceleration(pos, acc);
 }
 
-// Compute potential energy at a position
+// 위치에서의 잠재적 에너지(GPE) 계산 (RL 보상 등에 활용 가능)
 function computePotentialEnergy(pos, mass = 1) {
   let pe = 0;
   for (const b of heavyBodies) {
@@ -619,11 +661,11 @@ function computePotentialEnergy(pos, mass = 1) {
   return pe;
 }
 
-// Compute collision risk at a position
+// 위치에서 충돌 위험도(0~1) 평가 : 행성 + 소행성 안전거리 기준
 function computeCollisionRisk(pos) {
   let risk = 0;
 
-  // Planet collision risk
+  // 행성 충돌 위험
   for (const b of heavyBodies) {
     const bp = b.pivot.getWorldPosition(new THREE.Vector3());
     const r = bp.distanceTo(pos);
@@ -634,7 +676,7 @@ function computeCollisionRisk(pos) {
     }
   }
 
-  // Asteroid collision risk
+  // 소행성 충돌 위험
   for (const o of dynamicObjects) {
     if (!o.alive || o.type !== 'asteroid') continue;
     const r = o.pos.distanceTo(pos);
@@ -647,25 +689,25 @@ function computeCollisionRisk(pos) {
   return Math.min(1, risk);
 }
 
-// Compute avoidance vector for hazardous areas
+// 위험 영역(행성/소행성)으로부터 멀어지는 방향 벡터 계산
 function computeAvoidanceVector(pos) {
   const dir = new THREE.Vector3();
 
-  // Avoid planets
+  // 행성 쪽으로 너무 가까이 가면, 밖으로 밀어내는 방향 추가
   for (const b of heavyBodies) {
     const bp = b.pivot.getWorldPosition(new THREE.Vector3());
-    const v = new THREE.Vector3().subVectors(pos, bp); // from planet to ship
-    v.y *= 0.2;
+    const v = new THREE.Vector3().subVectors(pos, bp); // 행성 → ship
+    v.y *= 0.2; // 위아래 방향 영향은 조금 줄임
     const d = v.length();
     const baseR = b.mesh.geometry.parameters.radius || 1;
     const safe = baseR * 5;
     if (d < safe && d > 1e-3) {
-      const w = (safe - d) / safe;
+      const w = (safe - d) / safe; // 가까울수록 강하게 회피
       dir.addScaledVector(v.normalize(), w / d);
     }
   }
 
-  // Avoid asteroids
+  // 소행성에 대해서도 동일한 회피 로직
   for (const o of dynamicObjects) {
     if (!o.alive || o.type !== 'asteroid') continue;
     const v = new THREE.Vector3().subVectors(pos, o.pos);
@@ -681,14 +723,14 @@ function computeAvoidanceVector(pos) {
   return dir;
 }
 
-// Get warp field influence and nearest direction
+// warp field 영향도 계산 (역장 중심에서 거리 비례)
 function computeWarpFieldInfo(pos) {
   let maxInfluence = 0;
   let nearestDir = new THREE.Vector3(0, 0, 0);
   for (const f of warpFields) {
     const d = f.center.distanceTo(pos);
     if (d > f.radius) continue;
-    const inf = 1 - d / f.radius;
+    const inf = 1 - d / f.radius; // 중심에 가까울수록 영향 ↑
     if (inf > maxInfluence) {
       maxInfluence = inf;
       nearestDir.subVectors(f.center, pos).normalize();
@@ -697,7 +739,7 @@ function computeWarpFieldInfo(pos) {
   return { influence: maxInfluence, dir: nearestDir };
 }
 
-// Get target planet position for RL
+// RL이 목표로 삼을 행성의 현재 위치
 function getRLTargetPos() {
   const sel = document.getElementById('autoTarget').value;
   const b = bodies[sel];
@@ -705,7 +747,7 @@ function getRLTargetPos() {
   return b.pivot.getWorldPosition(new THREE.Vector3());
 }
 
-// Get observation for a ship
+// 특정 우주선에 대한 '관측값' 패키징 (RL 용)
 function getObservation(ship) {
   const targetPos = getRLTargetPos();
   const g = computeGravitationalAcceleration(ship.pos);
@@ -740,6 +782,7 @@ function getObservation(ship) {
 // Spaceship and Asteroid Spawning
 // =================================================================
 
+// 주어진 위치에서 가장 가까운 ship 객체 찾기
 function getNearestShip(pos) {
   let best = null, bestDist = Infinity;
   for (const o of dynamicObjects) {
@@ -750,13 +793,16 @@ function getNearestShip(pos) {
   return best;
 }
 
+// 간단한 우주선 Mesh + 상태 생성
 function spawnSpaceshipSimple(pos, vel, policyType, color) {
+  // 원뿔(콘)을 X축 방향으로 눕혀서 우주선처럼 보이게
   const geo = new THREE.ConeGeometry(0.3, 0.8, 8);
   geo.rotateX(Math.PI / 2);
   const mat = new THREE.MeshStandardMaterial({ color });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.copy(pos);
   scene.add(mesh);
+
   const ship = {
     type: 'ship',
     mesh,
@@ -764,27 +810,29 @@ function spawnSpaceshipSimple(pos, vel, policyType, color) {
     vel: vel.clone(),
     mass: 0.05,
     radius: 0.4,
-    fuel: 1.0,
-    maxThrust: 0.22,
+    fuel: 1.0,             // 0~1 사이 연료량
+    maxThrust: 0.22,       // 최대 추력(가속)
     lastFuelUsed: 0,
     prevGoalDist: null,
-    totalReward: 0,
+    totalReward: 0,        // RL 보상 누적
     collided: false,
-    policyType,
+    policyType,            // "PETS" or "SAC"
     alive: true
   };
   dynamicObjects.push(ship);
   return ship;
 }
 
+// 단일 소행성 생성
 function spawnAsteroid(pos, vel) {
-  const sBase = Math.random()*0.6+0.2;
+  const sBase = Math.random()*0.6+0.2; // 기본 크기 랜덤
   const s = sBase * 0.5;
   const geo = new THREE.DodecahedronGeometry(s, 0);
   const mat = new THREE.MeshStandardMaterial({ color: 0x999999 });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.copy(pos);
   scene.add(mesh);
+
   const obj = {
     type: 'asteroid',
     mesh,
@@ -798,17 +846,24 @@ function spawnAsteroid(pos, vel) {
   return obj;
 }
 
+// 소행성 '군집' 생성 (한 점 기준으로 여러 개 생성)
 function spawnAsteroidSwarm(centerPos, ship) {
   const pos = centerPos.clone();
   let dirToShip = new THREE.Vector3(0, 0, 0);
   if (ship) {
+    // 소행성 군집의 y는 우주선 높이와 맞추기
     pos.y = ship.pos.y;
     dirToShip.subVectors(ship.pos, pos);
     if (dirToShip.lengthSq() > 0) dirToShip.normalize();
   }
+
   const baseSpeed = ship ? 0.25 : 0.0;
   const baseVel = dirToShip.clone().multiplyScalar(baseSpeed);
+
+  // 중심 소행성 1개
   spawnAsteroid(pos, baseVel);
+
+  // 주변에 퍼지는 소행성들
   const count = 6;
   for (let i = 0; i < count; i++) {
     const offset = new THREE.Vector3(
@@ -817,6 +872,7 @@ function spawnAsteroidSwarm(centerPos, ship) {
     const p = pos.clone().add(offset);
     let v = baseVel.clone();
     if (ship && baseSpeed > 0) {
+      // 우주선 방향으로 대략 움직이도록 랜덤 속도 부여
       const randomDir = new THREE.Vector3(
         (Math.random()-0.5)*0.3,
         (Math.random()-0.5)*0.05,
@@ -827,11 +883,14 @@ function spawnAsteroidSwarm(centerPos, ship) {
     spawnAsteroid(p, v);
   }
 }
-
+</script>
+<!-- ====== 3부 JS: Warp Field + 이펙트 + RL + 예측 궤도 ====== -->
+<script>
 // =================================================================
 // Warp Field (Distortion Field) Creation & Updates
 // =================================================================
 
+// 우주선과 목표 행성 사이에 "역장"(중력 왜곡 필드) 생성
 function spawnWarpField() {
   const targetPos = getRLTargetPos();
   const mainShip  = activeShip || getNearestShip(targetPos);
@@ -839,11 +898,14 @@ function spawnWarpField() {
     console.warn('역장을 만들 우주선이 없습니다.');
     return;
   }
-  const center = new THREE.Vector3().lerpVectors(mainShip.pos, targetPos, 0.5);
-  const radius   = 40;
-  const strength = 0.8;
-  const life     = 80;
 
+  // 우주선과 타겟 사이 중간 지점에 역장 생성
+  const center = new THREE.Vector3().lerpVectors(mainShip.pos, targetPos, 0.5);
+  const radius   = 40;   // 역장 반경
+  const strength = 0.8;  // 강도
+  const life     = 80;   // 수명(초 기준)
+
+  // 시각화용 구(와이어프레임)
   const sGeo = new THREE.SphereGeometry(radius, 32, 32);
   const sMat = new THREE.MeshBasicMaterial({
     color: 0x8844ff,
@@ -858,6 +920,7 @@ function spawnWarpField() {
   warpFields.push({ center, radius, strength, life, maxLife: life, sphere });
 }
 
+// 역장들의 남은 수명 관리 + 투명도 줄이기
 function updateWarpFields(dtReal) {
   for (let i = warpFields.length - 1; i >= 0; i--) {
     const f = warpFields[i];
@@ -872,7 +935,7 @@ function updateWarpFields(dtReal) {
   }
 }
 
-// Apply warp field distortion to acceleration
+// 각 warp field가 가속도에 어떻게 영향을 줄지 계산하여 acc를 조정
 function applyWarpFieldsToAcceleration(pos, acc) {
   if (!warpFields.length) return acc;
 
@@ -887,9 +950,12 @@ function applyWarpFieldsToAcceleration(pos, acc) {
     if (d > f.radius) continue;
     const falloff = 1 - d / f.radius;
     const strength = f.strength * falloff;
+
+    // 역장에서는 기존 중력을 조금 약하게
     const weaken = 1 - 0.4 * strength;
     acc.multiplyScalar(weaken);
 
+    // 태양과 타겟 사이의 방향을 섞어서 "가속 방향"을 비틀어줌
     const toTarget = new THREE.Vector3().subVectors(targetPos, pos).normalize();
     const toSun    = new THREE.Vector3().subVectors(sunPos, pos).normalize();
     const lateral  = new THREE.Vector3().crossVectors(toSun, new THREE.Vector3(0,1,0)).normalize();
@@ -897,6 +963,7 @@ function applyWarpFieldsToAcceleration(pos, acc) {
       .addScaledVector(toTarget, 0.8)
       .addScaledVector(lateral, 0.4)
       .normalize();
+
     const baseMag  = acc.length();
     const extraMag = baseMag * 1.2 * strength;
     acc.addScaledVector(warpDir, extraMag);
@@ -908,6 +975,7 @@ function applyWarpFieldsToAcceleration(pos, acc) {
 // Effects: Explosions and Thrust Particles
 // =================================================================
 
+// 우주선/소행성 충돌 시 폭발 이펙트 생성
 function explodeAt(pos) {
   const group = new THREE.Group();
   for (let i = 0; i < 18; i++) {
@@ -936,16 +1004,17 @@ function explodeAt(pos) {
   }, 50);
 }
 
-// Thrust particle effect
+// 엔진 분사 시 파티클(불꽃) 생성
 function spawnThrustParticle(ship, dir) {
   const geo = new THREE.SphereGeometry(0.15, 8, 8);
   const mat = new THREE.MeshBasicMaterial({
-    color: ship.policyType === "PETS" ? 0xffdd66 : 0x66c0ff,
+    color: ship.policyType === "PETS" ? 0xffdd66 : 0x66c0ff, // 정책별 색 구분
     transparent: true,
     opacity: 0.9
   });
   const p = new THREE.Mesh(geo, mat);
   const back = dir.clone().multiplyScalar(-1);
+  // 우주선 뒤쪽에서 파티클 나오게 위치 조정
   p.position.copy(ship.pos).addScaledVector(back, ship.radius || 0.8);
   p.userData.vel = back.multiplyScalar(0.6);
   p.userData.life = 0.6;
@@ -953,6 +1022,7 @@ function spawnThrustParticle(ship, dir) {
   thrustParticles.push(p);
 }
 
+// 파티클 수명 감소 + 이동
 function updateThrustParticles(dt) {
   for (let i = thrustParticles.length - 1; i >= 0; i--) {
     const p = thrustParticles[i];
@@ -970,14 +1040,16 @@ function updateThrustParticles(dt) {
 // Reinforcement Learning Action Application (PETS / SAC)
 // =================================================================
 
+// RL 정책에서 나온 action을 실제 우주선 상태에 반영
 function applyRLAction(ship, action, dt) {
   const dir = action.dir.clone().normalize();
   const thrustOn = !!action.thrustOn;
   const fuelRatio = Math.max(0, Math.min(1, action.fuelRatio ?? 0.5));
   ship.lastFuelUsed = 0;
+
   if (thrustOn && ship.fuel > 0) {
     const thrustMag = ship.maxThrust * fuelRatio;
-    ship.vel.addScaledVector(dir, thrustMag * dt);
+    ship.vel.addScaledVector(dir, thrustMag * dt); // 속도 변경
     const fuelUsed = fuelRatio * dt * 0.9;
     ship.fuel = Math.max(0, ship.fuel - fuelUsed);
     ship.lastFuelUsed = fuelUsed;
@@ -985,26 +1057,31 @@ function applyRLAction(ship, action, dt) {
   }
 }
 
+// PETS: 샘플 기반 Model Predictive Control 비슷하게 후보 방향을 여러 개 테스트
 function stepPETS(ship, dt) {
   const obs = getObservation(ship);
   if (obs.dist < 1 || ship.fuel <= 0.01) return;
 
+  // 기본 방향: 목표를 향한 방향
   const baseDir = obs.toTarget.clone().normalize();
 
-  // Adjust for warp fields
+  // warp field 영향 반영
   if (obs.warpInfluence > 0) {
     baseDir.addScaledVector(obs.warpDir, 0.4 * obs.warpInfluence);
   }
 
-  // Avoid hazards
+  // 위험 회피 방향 섞기
   const avoidDir = computeAvoidanceVector(obs.pos);
   if (avoidDir.lengthSq() > 1e-6) {
     baseDir.addScaledVector(avoidDir.normalize(), 0.8);
   }
   baseDir.normalize();
 
+  // 여러 후보 방향을 생성해서 "가장 점수가 좋은" 방향을 선택
   let bestScore = -Infinity, bestDir = baseDir.clone();
-  const horizon = 8, candCount = 16;
+  const horizon = 8;    // 예측 스텝 수
+  const candCount = 16; // 후보 방향 개수
+
   for (let i = 0; i < candCount; i++) {
     const jitter = new THREE.Vector3(
       (Math.random()-0.5)*0.4,
@@ -1015,6 +1092,8 @@ function stepPETS(ship, dt) {
     let pos = obs.pos.clone();
     let vel = obs.vel.clone();
     let score = 0;
+
+    // 간단한 롤아웃: dt만큼 horizon 번 시뮬레이션 해보고 점수 계산
     for (let t = 0; t < horizon; t++) {
       const g = computeGravitationalAcceleration(pos);
       vel.addScaledVector(g, dt);
@@ -1022,13 +1101,13 @@ function stepPETS(ship, dt) {
       pos.addScaledVector(vel, dt);
 
       const d = pos.distanceTo(getRLTargetPos());
-      score -= d * 0.02;
-      // Penalize strong gravity (near Sun)
+      score -= d * 0.02;        // 타겟에 가까워질수록 좋은 점수
       const gMag = g.length();
-      score -= gMag * 1.2;
+      score -= gMag * 1.2;      // 중력이 너무 세면 페널티(태양 근처 등)
     }
+
     const risk = computeCollisionRisk(pos);
-    score -= risk * 3;
+    score -= risk * 3;          // 충돌 위험 페널티
 
     if (score > bestScore) {
       bestScore = score;
@@ -1042,31 +1121,22 @@ function stepPETS(ship, dt) {
     fuelRatio: 0.7
   }, dt);
 
-const progress = (ship.prevGoalDist ?? obs.dist) - obs.dist;
-const planePenalty = Math.abs(ship.pos.y) * 0.03;
-const gravPenalty  = obs.grav.length() * 6.0;
+  // 보상 설계: 목표에 가까워지는 정도 - 연료 사용 - 평면 이탈 - 강한 중력
+  const progress = (ship.prevGoalDist ?? obs.dist) - obs.dist;
+  const planePenalty = Math.abs(ship.pos.y) * 0.03;
+  const gravPenalty  = obs.grav.length() * 6.0;
+  ship.totalReward += progress * 15
+                    - ship.lastFuelUsed * 20
+                    - dt * 0.4
+                    - planePenalty * dt
+                    - gravPenalty  * dt;
+  ship.prevGoalDist = obs.dist;
 
-// ▣ L2 최적화(연료 아끼기)
-const fuelEfficiencyReward = -ship.lastFuelUsed * 12;
-
-// ▣ 스윙바이 보상 (속도 증가량 체크)
-const swingBoost = Math.max(0, ship.vel.length() - (ship.prevSpeed ?? ship.vel.length()));
-const slingshotReward = swingBoost * 6.0;
-ship.prevSpeed = ship.vel.length();
-
-// 최종 Reward 합산
-ship.totalReward +=
-      progress * 15
-    - ship.lastFuelUsed * 20
-    - dt * 0.4
-    - planePenalty * dt
-    - gravPenalty  * dt
-    + fuelEfficiencyReward
-    + slingshotReward;
-
-ship.prevGoalDist = obs.dist;
+  document.getElementById('petsFuel').textContent = (ship.fuel*100).toFixed(1);
+  document.getElementById('petsRew').textContent = ship.totalReward.toFixed(1);
 }
 
+// SAC: "toTarget, vel, grav" 방향 조합 + 약간의 노이즈로 정책 근사
 function stepSAC(ship, dt) {
   const obs = getObservation(ship);
   if (obs.dist < 1 || ship.fuel <= 0.01) return;
@@ -1074,21 +1144,24 @@ function stepSAC(ship, dt) {
   const velDir = obs.vel.length() > 1e-3 ? obs.vel.clone().normalize() : new THREE.Vector3();
   const gravDir = obs.grav.length() > 1e-4 ? obs.grav.clone().normalize() : new THREE.Vector3();
 
+  // 단순 선형 조합: 타겟 쪽으로 가려 하지만, 기존 속도나 중력 방향은 약하게 반대 방향
   let baseDir = new THREE.Vector3()
     .addScaledVector(toTargetDir, 1.0)
     .addScaledVector(velDir, -0.5)
     .addScaledVector(gravDir, -0.2);
 
+  // warp 영향 추가
   if (obs.warpInfluence > 0) {
     baseDir.addScaledVector(obs.warpDir, 0.6 * obs.warpInfluence);
   }
 
+  // 위험 회피 방향 추가
   const avoidDir = computeAvoidanceVector(obs.pos);
   if (avoidDir.lengthSq() > 1e-6) {
     baseDir.addScaledVector(avoidDir.normalize(), 1.0);
   }
 
-  // Add noise
+  // 탐색을 위한 노이즈
   const noise = new THREE.Vector3(
     (Math.random()-0.5)*0.3,
     (Math.random()-0.5)*0.2,
@@ -1103,34 +1176,24 @@ function stepSAC(ship, dt) {
   }, dt);
 
   const progress = (ship.prevGoalDist ?? obs.dist) - obs.dist;
-const planePenalty = Math.abs(ship.pos.y) * 0.03;
-const gravPenalty  = obs.grav.length() * 6.0;
+  const planePenalty = Math.abs(ship.pos.y) * 0.025;
+  const gravPenalty  = obs.grav.length() * 4.0;
+  ship.totalReward += progress * 10
+                    - ship.lastFuelUsed * 10
+                    - dt * 0.3
+                    - planePenalty * dt
+                    - gravPenalty * dt;
+  ship.prevGoalDist = obs.dist;
 
-// ▣ L2 최적화(연료 아끼기)
-const fuelEfficiencyReward = -ship.lastFuelUsed * 12;
-
-// ▣ 스윙바이 보상 (속도 증가량 체크)
-const swingBoost = Math.max(0, ship.vel.length() - (ship.prevSpeed ?? ship.vel.length()));
-const slingshotReward = swingBoost * 6.0;
-ship.prevSpeed = ship.vel.length();
-
-// 최종 Reward 합산
-ship.totalReward +=
-      progress * 15
-    - ship.lastFuelUsed * 20
-    - dt * 0.4
-    - planePenalty * dt
-    - gravPenalty  * dt
-    + fuelEfficiencyReward
-    + slingshotReward;
-
-ship.prevGoalDist = obs.dist;
+  document.getElementById('sacFuel').textContent = (ship.fuel*100).toFixed(1);
+  document.getElementById('sacRew').textContent = ship.totalReward.toFixed(1);
 }
 
 // =================================================================
-// Trajectory Prediction
+// Trajectory Prediction (예측 궤도 표시)
 // =================================================================
 
+// 원래 버전의 predictTrajectory (현재는 사용 안 할 수도 있음)
 function predictTrajectory(ship, policyType, steps = 220, dtSec = 0.35) {
   const pts = [];
   let pos  = ship.pos.clone();
@@ -1189,15 +1252,14 @@ function predictTrajectory(ship, policyType, steps = 220, dtSec = 0.35) {
 }
 
 let petsPathLine = null, sacPathLine = null;
-  
+
+// 예측 궤도를 실제 씬에 라인으로 표시
 function showPredictedPath(ship, policyType, targetName) {
-  // ✨ 1. pts 먼저 계산
+  // 새 버전: 회피 포함 예측 함수 사용
   const pts = predictTrajectoryWithAvoidance(ship, targetName);
 
-  // ✨ 2. pts가 없으면 종료
   if (!pts || !pts.length) return;
 
-  // ✨ 3. 라인 생성
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
   const color = policyType === "PETS" ? 0xffdd33 : 0x33aaff;
   const mat = new THREE.LineBasicMaterial({color, transparent: true, opacity: 0.8});
@@ -1205,7 +1267,7 @@ function showPredictedPath(ship, policyType, targetName) {
 
   scene.add(line);
 
-  // ✨ 4. 기존 라인 제거 후 갱신
+  // 정책별로 이전 경로 라인은 제거
   if (policyType === "PETS") {
     if (petsPathLine) scene.remove(petsPathLine);
     petsPathLine = line;
@@ -1214,7 +1276,9 @@ function showPredictedPath(ship, policyType, targetName) {
     sacPathLine = line;
   }
 }
-
+</script>
+<!-- ====== 4부 JS: UI 컨트롤 + Kepler + 메인 루프 ====== -->
+<script>
 // =================================================================
 // UI Controls (Speed, Focus, etc.)
 // =================================================================
@@ -1222,6 +1286,7 @@ function showPredictedPath(ship, policyType, targetName) {
 const speed    = document.getElementById('speed');
 const speedNum = document.getElementById('speedNum');
 
+// 시뮬레이션 속도(배속) 설정
 function setRate(v) {
   const n = parseFloat(v);
   timeScale = Math.max(0, isNaN(n)? 0 : n);
@@ -1234,6 +1299,7 @@ document.querySelectorAll('.btn[data-rate]').forEach(btn => {
   btn.addEventListener('click', () => setRate(btn.dataset.rate));
 });
 
+// 포커스 타겟(카메라가 따라갈 대상) 설정
 const focusSel = document.getElementById('focusSel');
 function applyFocus() {
   const v = focusSel.value;
@@ -1244,6 +1310,7 @@ function applyFocus() {
 focusSel.addEventListener('change', applyFocus);
 axisList.forEach(a => a.visible = true);
 
+// 중력장 표시 토글 (현재는 실제 필드는 gravHelpers 배열로 확장 가능)
 const gravToggle = document.getElementById('gravToggle');
 let showGravityField = false;
 let gravHelpers = [];
@@ -1261,6 +1328,7 @@ const mouseVec  = new THREE.Vector2();
 const clickPlane= new THREE.Plane(new THREE.Vector3(0,1,0), 0);
 let pendingSpawn = null;
 
+// 마우스 클릭 위치를 y=0 평면(바닥)과의 교점으로 변환
 function getClickPositionOnPlane(e) {
   const rect = renderer.domElement.getBoundingClientRect();
   mouseVec.x = ((e.clientX - rect.left)/rect.width)*2 - 1;
@@ -1269,13 +1337,17 @@ function getClickPositionOnPlane(e) {
   const pos = new THREE.Vector3();
   const hit = raycaster.ray.intersectPlane(clickPlane, pos);
   if (!hit) {
+    // 평면과 안만나는 경우(아주 드물게)는 카메라 앞 방향으로 30만큼
     const dir = new THREE.Vector3();
     camera.getWorldDirection(dir);
     pos.copy(camera.position).add(dir.multiplyScalar(30));
   }
   return pos;
 }
+
+// 마우스 다운: 회전 / 팬 / 소행성 생성 모드 클릭 처리
 app.addEventListener('mousedown', e => {
+  // 소행성 군 생성 모드 ON 상태에서 좌클릭하면 해당 위치에 소행성 군 생성
   if (e.button === 0 && pendingSpawn?.type === 'asteroid') {
     const pos = getClickPositionOnPlane(e);
     const shipN = getNearestShip(pos);
@@ -1290,15 +1362,19 @@ app.addEventListener('mousedown', e => {
 });
 window.addEventListener('mouseup', () => { dragging = false; });
 app.addEventListener('contextmenu', e => e.preventDefault());
+
+// 마우스 이동: 좌클릭이면 카메라 회전, 우클릭 + 자유 모드이면 팬
 window.addEventListener('mousemove', e => {
   if (!dragging) return;
   const dx = e.clientX - px, dy = e.clientY - py;
   if (button === 0) {
+    // 좌클릭 드래그 → 카메라 공전 (theta, phi 조정)
     theta -= dx * 0.005;
     phi   -= dy * 0.005;
     const eps = 0.001;
     phi = Math.max(eps, Math.min(Math.PI - eps, phi));
   } else if (button === 2 && !focusTarget) {
+    // 우클릭 드래그 + 자유 모드 → 카메라 타겟 평행 이동
     const s = radius * 0.0012;
     camera.updateMatrixWorld();
     const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
@@ -1310,6 +1386,8 @@ window.addEventListener('mousemove', e => {
   px = e.clientX; py = e.clientY;
   updateCam();
 });
+
+// 마우스 휠: 줌(카메라 거리 변경)
 app.addEventListener('wheel', e => {
   e.preventDefault();
   radius *= 1 + Math.sign(e.deltaY) * 0.08;
@@ -1321,14 +1399,19 @@ app.addEventListener('wheel', e => {
 // Button Events
 // =================================================================
 
+// 소행성 군 버튼: 다음 좌클릭 위치에 소행성 생성하도록 플래그만 세팅
 document.getElementById('spawnAst').addEventListener('click', () => {
   pendingSpawn = {type: 'asteroid'};
   console.log('소행성 군 생성 모드: 화면을 클릭하세요.');
 });
+
+// 역장 생성 버튼: 현재 우주선과 타겟 사이에 warp field 생성
 document.getElementById('spawnField').addEventListener('click', () => {
   spawnWarpField();
   console.log('역장 생성: 우주선과 목표 지점 사이에 생성.');
 });
+
+// 모두 삭제: 우주선/소행성/역장/경로 라인 초기화
 document.getElementById('clearObjs').addEventListener('click', () => {
   dynamicObjects.forEach(o => scene.remove(o.mesh));
   dynamicObjects.length = 0;
@@ -1353,6 +1436,7 @@ const resultLine = document.getElementById('resultLine');
 const resultPercent = document.getElementById('resultPercent');
 const logContent = document.getElementById('logContent');
 
+// PETS/SAC 체크박스로 가시성/사용 여부 조절
 document.getElementById('petsEnable').addEventListener('change', e => {
   petsEnabled = e.target.checked;
   if (petsShip) petsShip.mesh.visible = petsEnabled;
@@ -1364,16 +1448,19 @@ document.getElementById('sacEnable').addEventListener('change', e => {
 
 let episodeTime = 0;
 
+// "우주선 소환" 버튼 클릭 시 두 척(PETS, SAC) 동시에 생성
 document.getElementById('spawnShip').addEventListener('click', () => {
+  // 기존 우주선 제거
   if (petsShip) { scene.remove(petsShip.mesh); petsShip.alive = false; }
   if (sacShip)  { scene.remove(sacShip.mesh); sacShip.alive = false; }
   petsShip = null; sacShip = null; activeShip = null;
   if (petsPathLine) scene.remove(petsPathLine);
   if (sacPathLine) scene.remove(sacPathLine);
   episodeFinished = false;
-  simulationPaused = true;
+  simulationPaused = true; // 선택하기 전까지는 멈춰두기
   episodeTime = 0;
 
+  // 기본 발사 위치: 지구 근처
   let basePos;
   const earth = bodies['지구'];
   if (earth) {
@@ -1383,16 +1470,20 @@ document.getElementById('spawnShip').addEventListener('click', () => {
   }
 
   const vel = new THREE.Vector3(0, 0, 0.1);
+  // PETS와 SAC 우주선을 약간 z-축으로 떨어지게 배치
   petsShip = spawnSpaceshipSimple(basePos.clone().add(new THREE.Vector3(0,0,-1.5)), vel, "PETS", 0xffdd33);
   sacShip  = spawnSpaceshipSimple(basePos.clone().add(new THREE.Vector3(0,0, 1.5)), vel, "SAC", 0x33aaff);
 
+  // 각 정책의 예측 궤도 라인을 먼저 표시
   showPredictedPath(petsShip, "PETS");
   showPredictedPath(sacShip, "SAC");
   pathUpdateTimer = 0;
 
+  // 어떤 정책을 실제로 쓸지 선택하는 버튼 표시
   choiceRow.style.display = 'flex';
 });
 
+// PETS 선택 → SAC 우주선 제거하고 PETS만 움직이게
 document.getElementById('choosePETS').addEventListener('click', () => {
   if (!petsShip) return;
   if (sacShip) { scene.remove(sacShip.mesh); sacShip.alive = false; sacShip = null; }
@@ -1404,6 +1495,7 @@ document.getElementById('choosePETS').addEventListener('click', () => {
   pathUpdateTimer = 0;
 });
 
+// SAC 선택 → PETS 우주선 제거하고 SAC만 움직이게
 document.getElementById('chooseSAC').addEventListener('click', () => {
   if (!sacShip) return;
   if (petsShip) { scene.remove(petsShip.mesh); petsShip.alive = false; petsShip = null; }
@@ -1419,6 +1511,7 @@ document.getElementById('chooseSAC').addEventListener('click', () => {
 // Reset and Episode Management
 // =================================================================
 
+// 결과 모달에서 바깥 클릭 후 전체 리셋할 때 사용하는 초기화 함수
 function resetAllEvents() {
   for (let i = dynamicObjects.length - 1; i >= 0; i--) {
     scene.remove(dynamicObjects[i].mesh);
@@ -1438,6 +1531,7 @@ function resetAllEvents() {
   pathUpdateTimer = 0;
 }
 
+// 한 번의 비행 에피소드 종료 처리 (성공/실패)
 function endEpisode(ship, success) {
   if (episodeFinished) return;
   episodeFinished = true;
@@ -1451,12 +1545,14 @@ function endEpisode(ship, success) {
   resultPercent.textContent = `성공률 ${percent}% (${totalSuccess}/${totalAttempts})`;
   resultOverlay.style.display = 'flex';
 
+  // 오른쪽 아래 로그에 기록 추가
   const ts = new Date().toISOString().slice(11, 19);
   const line = document.createElement('div');
   line.textContent = `[${ts}] ${method} → ${targetName}: ${success ? "성공" : "실패"}`;
   logContent.prepend(line);
 }
 
+// 모달 바깥 클릭 시 닫고 전체 리셋
 resultOverlay.addEventListener('click', e => {
   if (e.target === resultOverlay) {
     resultOverlay.style.display = 'none';
@@ -1468,16 +1564,17 @@ resultOverlay.addEventListener('click', e => {
 // Kepler and Future Position
 // =================================================================
 
+// 행성의 'deltaDays일 후' 위치를 Kepler 방정식으로 계산
 function getFuturePlanetPos(body, deltaDays) {
   if (!body) return new THREE.Vector3(0, 0, 0);
   if (!body.orbitPeriodDays || body.orbitPeriodDays <= 0) {
     return body.pivot.getWorldPosition(new THREE.Vector3());
   }
-  const n = (2 * Math.PI) / body.orbitPeriodDays;
+  const n = (2 * Math.PI) / body.orbitPeriodDays; // 평균 운동
   const M0 = body.meanAnomaly || 0;
-  const M = M0 + n * deltaDays;
+  const M = M0 + n * deltaDays;                   // 미래의 평균 근점이각
   const e = body.ecc || 0;
-  const E = solveKepler(M, e);
+  const E = solveKepler(M, e);                    // 편심 이각
   const a = body.semiMajor;
   const b = a * Math.sqrt(Math.max(0, 1 - e*e));
   const x0 = a * (Math.cos(E) - e);
@@ -1488,11 +1585,11 @@ function getFuturePlanetPos(body, deltaDays) {
   return pos;
 }
 
-// 🔹 개선된 예측 궤도 생성 함수: 목표 이동 + 회피 포함
+// 🔹 개선된 예측 궤도 생성: 시간에 따라 목표도 움직이도록 + 충돌 회피 고려
 function predictTrajectoryWithAvoidance(ship, targetName) {
   const steps = 300;
-  const dtSec = 3 * 3600;
-  const dtDay = dtSec / 86400;
+  const dtSec = 3 * 3600;      // 3시간 단위로 진행
+  const dtDay = dtSec / 86400; // 일 단위 변환
 
   const ghostShip = {
     pos: ship.pos.clone(),
@@ -1520,6 +1617,7 @@ function predictTrajectoryWithAvoidance(ship, targetName) {
     const avoid = computeAvoidanceVector(ghostShip.pos);
     dir.addScaledVector(avoid, 0.7).normalize();
 
+    // thrust를 아주 약하게, 방향만 참고용으로 적용
     const thrustAcc = dir.clone().multiplyScalar(ship.maxThrust * 0.003);
     ghostShip.vel.add(thrustAcc);
 
@@ -1535,7 +1633,7 @@ function predictTrajectoryWithAvoidance(ship, targetName) {
   return pathPts;
 }
 
-  
+// Kepler 방정식 E - e sinE = M 을 Newton-Raphson으로 푸는 함수
 function solveKepler(M, e) {
   let E = M;
   for (let i = 0; i < 12; i++) {
@@ -1554,7 +1652,7 @@ let last = performance.now();
 const hudBox = document.getElementById('hudBox');
 
 function tick(now) {
-  const dtReal = (now - last) / 1000;
+  const dtReal = (now - last) / 1000; // 실제 경과 시간(초)
   last = now;
 
   const dtDays = simulationPaused ? 0 : dtReal * timeScale;
@@ -1563,12 +1661,14 @@ function tick(now) {
     episodeTime += dtReal;
   }
 
+  // 시뮬레이션 날짜 업데이트
   if (dtDays !== 0) {
     simDate = new Date(simDate.getTime() + dtDays * 24 * 3600 * 1000);
     document.getElementById("startTime").textContent =
       simDate.toISOString().replace("T", " ").slice(0, 19);
   }
 
+  // 활성 우주선의 예측 경로를 일정 주기마다 갱신
   if (activeShip && !episodeFinished) {
     pathUpdateTimer -= dtReal;
     if (pathUpdateTimer <= 0) {
@@ -1577,16 +1677,17 @@ function tick(now) {
     }
   }
 
+  // 물리 시뮬레이션에 사용하는 배속(최대 100배까지만 반영)
   const physScale = Math.max(0, Math.min(timeScale, 100));
   const dtPhys = simulationPaused ? 0 : dtReal * physScale;
 
-  // Sun rotation
+  // 태양 자전
   const sunBody = bodies["태양"];
   if (sunBody && dtDays !== 0) {
     sunBody.spin.rotation.y += dtDays * (2 * Math.PI / defs[0].rotH);
   }
 
-  // Planet revolution and rotation
+  // 행성 공전 + 자전
   if (dtDays !== 0) {
     for (const ps of planetStates) {
       const node = ps.node;
@@ -1612,7 +1713,7 @@ function tick(now) {
     }
   }
 
-  // Moons revolution and rotation
+  // 위성(달 등) 공전 + 자전
   if (dtDays !== 0) {
     for (const ps of planetStates) {
       for (const m of ps.moons) {
@@ -1635,26 +1736,26 @@ function tick(now) {
     }
   }
 
-  // Dynamic objects update (ships and asteroids)
+  // Dynamic objects (ship + asteroid) 업데이트
   if (dtPhys > 0 && dynamicObjects.length > 0) {
     for (let i = dynamicObjects.length - 1; i >= 0; i--) {
       const o = dynamicObjects[i];
       if (!o.alive) continue;
 
-      // Apply RL policy if ship
+      // ship이면 PETS/SAC 정책 적용
       if (o.type === "ship" && !episodeFinished) {
         if (o.policyType === "PETS" && petsEnabled) stepPETS(o, dtPhys);
         else if (o.policyType === "SAC" && sacEnabled) stepSAC(o, dtPhys);
       }
 
-      // Update physics (semi-implicit integration)
+      // 반분법(velocity Verlet 비슷한)으로 중력 적분
       const a0 = computeGravitationalAcceleration(o.pos);
       o.pos.addScaledVector(o.vel, dtPhys).addScaledVector(a0, 0.5 * dtPhys * dtPhys);
       const a1 = computeGravitationalAcceleration(o.pos);
       o.vel.addScaledVector(a0.add(a1).multiplyScalar(0.5), dtPhys);
       o.mesh.position.copy(o.pos);
 
-      // Collision with planets
+      // 행성과의 충돌 체크
       for (const hb of heavyBodies) {
         const hp = hb.pivot.getWorldPosition(new THREE.Vector3());
         const dist = hp.distanceTo(o.pos);
@@ -1673,7 +1774,7 @@ function tick(now) {
         }
       }
 
-      // Check success/failure for ships
+      // ship에 대해: 목표 도달/연료 소진/탈출 등 에피소드 종료 조건 체크
       if (o.type === "ship" && !episodeFinished && o.policyType) {
         const obs = getObservation(o);
         const targetName = document.getElementById("autoTarget").value;
@@ -1691,18 +1792,18 @@ function tick(now) {
           endEpisode(o, false);
         } else if (fromSun > outLimit) {
           endEpisode(o, false);
-        } else if (episodeTime > 180) {
+        } else if (episodeTime > 180) { // 3분 넘으면 타임아웃 실패
           endEpisode(o, false);
         }
       }
     }
   }
 
-  // Particle and warp field updates
+  // 엔진 파티클, 역장 업데이트
   updateThrustParticles(dtReal);
   updateWarpFields(dtReal);
 
-  // HUD display
+  // HUD 텍스트 갱신 (두 정책이 동시에 존재할 때만)
   if (petsShip && sacShip) {
     const obsP = getObservation(petsShip);
     const obsS = getObservation(sacShip);
@@ -1725,9 +1826,3 @@ requestAnimationFrame(tick);
 
 </body>
 </html>
-
-
-
-
-
-
