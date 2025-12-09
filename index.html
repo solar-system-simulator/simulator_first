@@ -1169,14 +1169,22 @@ function predictTrajectory(ship, policyType, steps = 220, dtSec = 0.35) {
 
 let petsPathLine = null, sacPathLine = null;
   
-function showPredictedPath(ship, policyType) {
-  if (!pts.length) return;
+function showPredictedPath(ship, policyType, targetName) {
+  // ✨ 1. pts 먼저 계산
+  const pts = predictTrajectoryWithAvoidance(ship, targetName);
+
+  // ✨ 2. pts가 없으면 종료
+  if (!pts || !pts.length) return;
+
+  // ✨ 3. 라인 생성
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
   const color = policyType === "PETS" ? 0xffdd33 : 0x33aaff;
   const mat = new THREE.LineBasicMaterial({color, transparent: true, opacity: 0.8});
   const line = new THREE.Line(geo, mat);
-  const pts = predictTrajectoryWithAvoidance(ship, targetName);
+
   scene.add(line);
+
+  // ✨ 4. 기존 라인 제거 후 갱신
   if (policyType === "PETS") {
     if (petsPathLine) scene.remove(petsPathLine);
     petsPathLine = line;
@@ -1696,6 +1704,7 @@ requestAnimationFrame(tick);
 
 </body>
 </html>
+
 
 
 
