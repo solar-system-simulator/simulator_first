@@ -1175,6 +1175,7 @@ function showPredictedPath(ship, policyType) {
   const color = policyType === "PETS" ? 0xffdd33 : 0x33aaff;
   const mat = new THREE.LineBasicMaterial({color, transparent: true, opacity: 0.8});
   const line = new THREE.Line(geo, mat);
+  const pts = predictTrajectoryWithAvoidance(ship, targetName);
   scene.add(line);
   if (policyType === "PETS") {
     if (petsPathLine) scene.remove(petsPathLine);
@@ -1458,6 +1459,73 @@ function getFuturePlanetPos(body, deltaDays) {
   return pos;
 }
 
+// 🔹 개선된 예측 궤도 생성 함수: 목표 이동 + 회피 포함
+function predictTrajectoryWithAvoidance(ship, targetName) {
+const steps = 300; // 최대 시뮬레이션 스텝 수
+const dtSec = 3 * 3600; // 시간 증가 간격 (3시간)
+const dtDay = dtSec / 86400;
+
+
+const ghostShip = {
+pos: ship.pos.clone(),
+vel: ship.vel.clone(),
+alive: true
+};
+
+
+const pts = [];
+let t = 0;
+
+
+const targetBody = bodies[targetName];
+const targetR = targetBody?.mesh?.geometry?.parameters?.radius || 1;
+
+
+for (let i = 0; i < steps; i++) {
+const p = ghostShip.pos.clone();
+pts.push(p);
+
+
+t += dtDay;
+
+
+// 미래 목표 위치 계산
+const futureTargetPos = getFuturePlanetPos(targetBody, t);
+const toTarget = futureTargetPos.clone().sub(ghostShip.pos);
+
+
+// 기본 추진 방향 (목표 향함)
+let dir = toTarget.clone().normalize();
+
+
+// 회피 벡터 반영
+const avoid = computeAvoidanceVector(ghostShip.pos);
+dir.addScaledVector(avoid, 0.7).normalize();
+
+
+// 추진 가속도 적용 (연료 소모 없음)
+const thrustAcc = dir.clone().multiplyScalar(ship.maxThrust * 0.003);
+ghostShip.vel.add(thrustAcc);
+
+
+// 중력 가속도 적용
+const g = computeGravitationalAccelerationRaw(ghostShip.pos);
+ghostShip.vel.addScaledVector(g, dtSec);
+
+
+// 위치 갱신
+ghostShip.pos.addScaledVector(ghostShip.vel, dtSec);
+
+
+// 도달 여부 검사
+const dist = ghostShip.pos.distanceTo(futureTargetPos);
+if (dist < targetR * 4) break;
+}
+
+
+return pts;
+}
+  
 function solveKepler(M, e) {
   let E = M;
   for (let i = 0; i < 12; i++) {
@@ -1647,4 +1715,5 @@ requestAnimationFrame(tick);
 
 </body>
 </html>
+
 
