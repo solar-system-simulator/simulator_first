@@ -1613,24 +1613,6 @@ function predictTrajectoryWithAvoidance(ship, targetName) {
 
     let dir = toTarget.clone().normalize();
 
-    const avoid = computeAvoidanceVector(ghostShip.pos);
-    dir.addScaledVector(avoid, 0.7).normalize();
-
-    // thrust를 아주 약하게, 방향만 참고용으로 적용
-    const thrustAcc = dir.clone().multiplyScalar(ship.maxThrust * 0.003);
-    ghostShip.vel.add(thrustAcc);
-
-    const g = computeGravitationalAccelerationRaw(ghostShip.pos);
-    ghostShip.vel.addScaledVector(g, dtSec);
-
-    ghostShip.pos.addScaledVector(ghostShip.vel, dtSec);
-
-    const dist = ghostShip.pos.distanceTo(futureTargetPos);
-    if (dist < targetR * 3) break;
-
-        // ---- 방향 ----
-    let dir = toTarget.clone().normalize();
-
     // ---- 회피 벡터 약하게 ----
     const avoid = computeAvoidanceVector(ghost.pos);
     if (avoid.lengthSq() > 1e-6) {
@@ -1647,6 +1629,10 @@ function predictTrajectoryWithAvoidance(ship, targetName) {
     ghost.vel.addScaledVector(g, dtSec);
 
     ghost.pos.addScaledVector(ghost.vel, dtSec);
+
+    const dist = ghostShip.pos.distanceTo(futureTargetPos);
+    if (dist < targetR * 3) break;
+
   }
 
   return pathPts;
@@ -1845,4 +1831,5 @@ requestAnimationFrame(tick);
 
 </body>
 </html>
+
 
