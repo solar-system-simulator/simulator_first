@@ -985,7 +985,16 @@ function stepPETS(ship,dt){
   if (obs.dist < 1 || ship.fuel <= 0.01) return;
 
   const baseDir = obs.toTarget.clone().normalize();
-
+  
+  // === [개선 사항: 기본 방향에 L4/L5 유도 추가] ===
+  // L4 또는 L5가 가까이 있고 목표와 멀지 않다면, 그쪽으로 방향을 보정하여 궤도 안정성 확보 시도
+  if (obs.lgrgDist < 20 && (obs.lgrgType === 'L4' || obs.lgrgType === 'L5') && obs.dist > 15) {
+    // 목표보다 L 포인트가 더 가까워지면(10 이하) 가중치를 더 높일 수 있습니다.
+    const lgrgInfluence = Math.min(1.0, (20 - obs.lgrgDist) / 20) * 0.4;
+    baseDir.addScaledVector(obs.lgrgDir.clone().normalize(), lgrgInfluence); 
+    baseDir.normalize();
+  }
+  
   // 역장 방향 보정
   if (obs.warpInfluence > 0) {
     baseDir.addScaledVector(obs.warpDir, 0.4 * obs.warpInfluence);
@@ -1022,6 +1031,15 @@ function stepPETS(ship,dt){
   // ★ 중력이 너무 강한 지역(태양 근처 등)에는 큰 페널티
   const gMag = g.length();
   score -= gMag * 1.2;   // 값이 클수록 점수 감소
+
+  // === [개선 사항: L4/L5 근접 보너스 추가] ===
+  // L4/L5는 안정적인 궤도를 위한 좋은 경유지이므로 보상
+  const targetBody = bodies[document.getElementById('autoTarget').value];
+  const lgrg = getNearestLagrangePointInfo(pos, targetBody);
+  if ((lgrg.type === 'L4' || lgrg.type === 'L5') && lgrg.dist < 15) {
+        // 15 이내에 있으면, 가까울수록 (dist가 작을수록) 보너스
+        score += (15 - lgrg.dist) * 0.1;
+  }
 }
 
 // 행성/소행성 충돌 위험도
@@ -1069,6 +1087,13 @@ function stepSAC(ship,dt){
     .addScaledVector(velDir,    -0.5)
     .addScaledVector(gravDir,   -0.2);
 
+  // === [개선 사항: 기본 방향에 L4/L5 유도 추가] ===
+  // L4 또는 L5가 가까이 있고 목표와 멀지 않다면, 그쪽으로 방향을 보정
+  if (obs.lgrgDist < 20 && (obs.lgrgType === 'L4' || obs.lgrgType === 'L5') && obs.dist > 15) {
+    const lgrgInfluence = Math.min(1.0, (20 - obs.lgrgDist) / 20) * 0.5; // L-point가 가까울수록 강하게 유도
+    baseDir.addScaledVector(obs.lgrgDir.clone().normalize(), lgrgInfluence);
+  }
+  
   if (obs.warpInfluence > 0) {
     baseDir.addScaledVector(obs.warpDir, 0.6 * obs.warpInfluence);
   }
@@ -1140,6 +1165,13 @@ function predictTrajectory(ship, policyType, steps = 220, dtSec = 0.35) {
     const toDir = toTarget.clone().normalize();
     let dir;
 
+    // === [개선 사항: 미래 시점의 L 포인트 정보] ===
+    const targetBody = bodies[targetName];
+    const lgrgInfo = getFutureLagrangePointInfo(pos, targetBody, ghostDays);
+    const lgrgDir = lgrgInfo.toLPoint.clone().normalize();
+    // L4/L5가 20 거리 이내에 있고, 아직 목표에 도달하지 않았을 때 유도
+    const isStableLPointNearby = (lgrgInfo.type === 'L4' || lgrgInfo.type === 'L5') && lgrgInfo.dist < 20 && dist > 10;
+
     if (policyType === "PETS") {
       // PETS: 목표 방향 위주 + 아주 살짝 노이즈
       const jitter = new THREE.Vector3(
@@ -1148,6 +1180,11 @@ function predictTrajectory(ship, policyType, steps = 220, dtSec = 0.35) {
         (Math.random() - 0.5) * 0.2
       );
       dir = toDir.clone().add(jitter).normalize();
+      // (L4/L5 유도 추가)
+      if (isStableLPointNearby) {
+         dir.addScaledVector(lgrgDir, 0.3);
+      }
+      
     } else {
       // SAC: 목표 - 속도 - 중력 방향 조합
       const velDir = vel.length() > 1e-3
@@ -1161,6 +1198,11 @@ function predictTrajectory(ship, policyType, steps = 220, dtSec = 0.35) {
         .addScaledVector(toDir,   1.0)
         .addScaledVector(velDir, -0.4)
         .addScaledVector(gravDir,-0.2);
+
+      // (L4/L5 유도 추가)
+      if (isStableLPointNearby) {
+         dir.addScaledVector(lgrgDir, 0.5);
+      }
     }
 
     // ★ 더 이상 y 성분을 인위적으로 줄이지 않음 → 완전한 3D
@@ -1693,3 +1735,4 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
+
