@@ -1168,8 +1168,8 @@ function predictTrajectory(ship, policyType, steps = 220, dtSec = 0.35) {
 }
 
 let petsPathLine = null, sacPathLine = null;
+  
 function showPredictedPath(ship, policyType) {
-  const pts = predictTrajectory(ship, policyType);
   if (!pts.length) return;
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
   const color = policyType === "PETS" ? 0xffdd33 : 0x33aaff;
@@ -1715,5 +1715,6 @@ requestAnimationFrame(tick);
 
 </body>
 </html>
+
 
 
