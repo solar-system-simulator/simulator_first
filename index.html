@@ -1307,6 +1307,7 @@ function applyFocus() {
   updateCam();
 }
 focusSel.addEventListener('change', applyFocus);
+const axisList = [];
 axisList.forEach(a => a.visible = true);
 
 // 중력장 표시 토글 (현재는 실제 필드는 gravHelpers 배열로 확장 가능)
@@ -1830,6 +1831,7 @@ requestAnimationFrame(tick);
 
 </body>
 </html>
+
 
 
 
