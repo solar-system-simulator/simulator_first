@@ -1461,70 +1461,51 @@ function getFuturePlanetPos(body, deltaDays) {
 
 // 🔹 개선된 예측 궤도 생성 함수: 목표 이동 + 회피 포함
 function predictTrajectoryWithAvoidance(ship, targetName) {
-const steps = 300; // 최대 시뮬레이션 스텝 수
-const dtSec = 3 * 3600; // 시간 증가 간격 (3시간)
-const dtDay = dtSec / 86400;
+  const steps = 300;
+  const dtSec = 3 * 3600;
+  const dtDay = dtSec / 86400;
 
+  const ghostShip = {
+    pos: ship.pos.clone(),
+    vel: ship.vel.clone(),
+    alive: true
+  };
 
-const ghostShip = {
-pos: ship.pos.clone(),
-vel: ship.vel.clone(),
-alive: true
-};
+  const pathPts = [];
+  let t = 0;
 
+  const targetBody = bodies[targetName];
+  const targetR = targetBody?.mesh?.geometry?.parameters?.radius || 1;
 
-const pts = [];
-let t = 0;
+  for (let i = 0; i < steps; i++) {
+    const p = ghostShip.pos.clone();
+    pathPts.push(p);
 
+    t += dtDay;
 
-const targetBody = bodies[targetName];
-const targetR = targetBody?.mesh?.geometry?.parameters?.radius || 1;
+    const futureTargetPos = getFuturePlanetPos(targetBody, t);
+    const toTarget = futureTargetPos.clone().sub(ghostShip.pos);
 
+    let dir = toTarget.clone().normalize();
 
-for (let i = 0; i < steps; i++) {
-const p = ghostShip.pos.clone();
-pts.push(p);
+    const avoid = computeAvoidanceVector(ghostShip.pos);
+    dir.addScaledVector(avoid, 0.7).normalize();
 
+    const thrustAcc = dir.clone().multiplyScalar(ship.maxThrust * 0.003);
+    ghostShip.vel.add(thrustAcc);
 
-t += dtDay;
+    const g = computeGravitationalAccelerationRaw(ghostShip.pos);
+    ghostShip.vel.addScaledVector(g, dtSec);
 
+    ghostShip.pos.addScaledVector(ghostShip.vel, dtSec);
 
-// 미래 목표 위치 계산
-const futureTargetPos = getFuturePlanetPos(targetBody, t);
-const toTarget = futureTargetPos.clone().sub(ghostShip.pos);
+    const dist = ghostShip.pos.distanceTo(futureTargetPos);
+    if (dist < targetR * 4) break;
+  }
 
-
-// 기본 추진 방향 (목표 향함)
-let dir = toTarget.clone().normalize();
-
-
-// 회피 벡터 반영
-const avoid = computeAvoidanceVector(ghostShip.pos);
-dir.addScaledVector(avoid, 0.7).normalize();
-
-
-// 추진 가속도 적용 (연료 소모 없음)
-const thrustAcc = dir.clone().multiplyScalar(ship.maxThrust * 0.003);
-ghostShip.vel.add(thrustAcc);
-
-
-// 중력 가속도 적용
-const g = computeGravitationalAccelerationRaw(ghostShip.pos);
-ghostShip.vel.addScaledVector(g, dtSec);
-
-
-// 위치 갱신
-ghostShip.pos.addScaledVector(ghostShip.vel, dtSec);
-
-
-// 도달 여부 검사
-const dist = ghostShip.pos.distanceTo(futureTargetPos);
-if (dist < targetR * 4) break;
+  return pathPts;
 }
 
-
-return pts;
-}
   
 function solveKepler(M, e) {
   let E = M;
@@ -1715,6 +1696,7 @@ requestAnimationFrame(tick);
 
 </body>
 </html>
+
 
 
 
