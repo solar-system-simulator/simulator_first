@@ -1237,13 +1237,13 @@ function predictTrajectory(ship, policyType, steps = 220, dtSec = 0.35) {
 
     // 적응형 추력 비율 계산
     const baseFuelRatio = policyType === "PETS" ? 0.7 : 0.5;
-    let fuelRatio;
+    let fuelRati;
     if (dist > 50) {
-        fuelRatio = baseFuelRatio;
+        fuelRati = baseFuelRatio;
     } else if (dist > 10) {
-        fuelRatio = baseFuelRatio * (0.2 + 0.8 * (dist - 10) / 40);
+        fuelRati = baseFuelRatio * (0.2 + 0.8 * (dist - 10) / 40);
     } else {
-        fuelRatio = baseFuelRatio * 0.15;
+        fuelRati = baseFuelRatio * 0.15;
     }
       
     // 간단한 추력/연료 모델
@@ -1770,5 +1770,6 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
+
 
 
