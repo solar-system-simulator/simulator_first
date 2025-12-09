@@ -589,6 +589,7 @@ for (const ps of planetStates) {
   const ring = new THREE.Mesh(geo, mat);
   saturn.pivot.add(ring);
 })();
+</script>
 <script>
 // =================================================================
 // Physics & Observation Functions
@@ -1654,6 +1655,7 @@ function solveKepler(M, e) {
 // =================================================================
 
 let last = performance.now();
+let timeScale = 0.3;
 const hudBox = document.getElementById('hudBox');
 
 function tick(now) {
@@ -1831,6 +1833,7 @@ requestAnimationFrame(tick);
 
 </body>
 </html>
+
 
 
 
