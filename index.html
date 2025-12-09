@@ -969,6 +969,21 @@ function applyRLAction(ship, action, dt) {
   const dir = action.dir.clone().normalize();
   const thrustOn = !!action.thrustOn;
   const fuelRatio = Math.max(0,Math.min(1,action.fuelRatio ?? 0.5));
+  let finalDir = dir.clone().normalize();
+  // === [개선 사항: 미세 자세 제어 적용] ===
+  // action.pitchYaw는 [-1, 1] 범위의 두 값을 가짐. (Yaw, Pitch)
+  if (action.pitchYaw) { 
+      const maxAngle = THREE.MathUtils.degToRad(1); // 최대 1도 미세 조정
+      const yaw = action.pitchYaw[0] * maxAngle;
+      const pitch = action.pitchYaw[1] * maxAngle;
+        
+      // 현재 최종 방향을 기준으로 Yaw/Pitch 회전 적용
+      const rotationMatrix = new THREE.Matrix4();
+      rotationMatrix.makeRotationAxis(new THREE.Vector3(0, 1, 0), yaw); // Yaw (수직축 회전)
+      rotationMatrix.multiply(new THREE.Matrix4().makeRotationAxis(finalDir.clone().cross(new THREE.Vector3(0, 1, 0)).normalize(), pitch)); // Pitch
+        
+      finalDir.applyMatrix4(rotationMatrix);
+    }
   ship.lastFuelUsed=0;
   if(thrustOn && ship.fuel>0){
     const thrustMag = ship.maxThrust*fuelRatio;
@@ -978,6 +993,7 @@ function applyRLAction(ship, action, dt) {
     ship.lastFuelUsed = fuelUsed;
     spawnThrustParticle(ship,dir);
   }
+  ship.lastActionDir = finalDir.clone();
 }
 
 function stepPETS(ship,dt){
@@ -1054,19 +1070,145 @@ score -= risk * 3;
     dir:bestDir,
     fuelRatio:0.7
   },dt);
-  const progress = (ship.prevGoalDist ?? obs.dist) - obs.dist;
+const progress = (ship.prevGoalDist ?? obs.dist) - obs.dist;
+// === [개선 사항: Y축 속도(Vy) 포함 궤도 평면 페널티] ===
+const yPosPenalty = Math.abs(ship.pos.y) * 0.025; // Y축 위치에 대한 페널티
+const yVelPenalty = Math.abs(ship.vel.y) * 1.5;   // Y축 속도에 대한 페널티 (Vy가 클수록 강함)
+// === [개선 사항: 속도 벡터 정렬 보너스] ===
+const alignmentBonus = obs.targetVelDot * 1.8;
+const inclinationPenalty = yPosPenalty + yVelPenalty; // 새로운 결합 페널티
 
 // 평면에서 너무 멀리 벗어나면 페널티 (y 축으로 너무 도망가는 것 방지)
 const planePenalty = Math.abs(ship.pos.y) * 0.03;
 
 // 중력이 강한 구역(태양 근처)에 있을수록 페널티
 const gravPenalty  = obs.grav.length() * 6.0;
+// === [개선 사항: 추력 벡터 떨림 페널티] ===
+const lastDir = ship.lastActionDir || new THREE.Vector3(1, 0, 0); // 초기값 설정
+const currentDir = (ship.activeShip ? ship.lastActionDir : bestDir).clone().normalize(); // PETS는 bestDir 사용
+const angleRad = lastDir.angleTo(currentDir); // 이전 방향과 현재 방향 사이의 각도(라디안)
 
+// 각도의 제곱에 비례하여 페널티: 큰 변화에 더 큰 페널티
+const jitterPenalty = angleRad * angleRad * 20.0;
+// 1. 핵심 보상: 거리당 연료 효율 (progress / fuelUsed)
+let efficiencyBonus = 0;
+if (fuelPenalty > 0.001) {
+    // 연료 소모가 있을 때, 단위 연료당 거리 근접 보너스
+    efficiencyBonus = (progress / fuelPenalty) * 10.0;
+} else if (progress > 0) {
+    // 연료 소모 없이 거리가 가까워지면 큰 보너스 (중력 도움 등)
+    efficiencyBonus = progress * 15.0; 
+}
+
+// 2. 보조 보상: 목표 속도 정렬 보너스 (targetVelDot: 속도와 목표 방향 내적)
+const alignmentBonus = obs.targetVelDot * 5.0; 
+
+// 3. 페널티: 과도한 운동 에너지 (KE) 페널티
+const kineticPenalty = obs.kinetic * 0.005;
+
+// 4. 페널티: 강한 시간 페널티
+const timePenalty = 0.8;
+/ B. 최종 접근 및 소프트 캡처 (Terminal Phase & Soft Capture)
+
+const dist = obs.dist;
+const velMag = obs.vel.length();
+const gravMag = obs.grav.length();
+
+// 1. 핵심 보상: 거리 역제곱 보너스 (Final Approach Bonus)
+let inverseDistBonus = 0;
+if (dist > 0.01) {
+    inverseDistBonus = (1 / (dist * dist)) * 5000.0;
+}
+
+// 2. 보조 보상: 저속 접근 보너스 (Soft Capture Bonus)
+let softCaptureBonus = 0;
+if (dist < 10) { 
+    // 목표 근처에서만 적용
+    softCaptureBonus = (1 / (1 + velMag)) * 5.0;
+}
+
+// 3. 페널티: 중력 가속도 제곱 페널티
+const gravSquaredPenalty = (gravMag * gravMag) * 0.5;
+
+// 4. 페널티: 추력 벡터 떨림 페널티 (Jitter Penalty)
+const lastDir = ship.lastActionDir || new THREE.Vector3(1, 0, 0); 
+const currentDir = /* PETS: bestDir, SAC: baseDir */ baseDir.clone().normalize(); 
+const angleRad = lastDir.angleTo(currentDir);
+const jitterPenalty = angleRad * angleRad * 50.0;
+// C. 전략적 경유지 활용 (Gravity Assist & L-Point Flyby)
+
+// GA 보너스 (GA가 임시 목표로 설정된 후 성공적으로 접근했을 때)
+let gaFlybyReward = 0;
+if (obs.gaAvailable && obs.distToGA < gaOpportunity.flybyRadius * 1.5) {
+    // GA 플라이바이 지점을 통과한 것으로 간주하여 일회성 큰 보상 부여
+    gaFlybyReward = 20.0; 
+    // 에이전트가 이 보상을 받은 후 즉시 GA 기회 플래그를 꺼야 함 (RL 환경에서 처리 필요)
+}
+
+// 2. 보조 보상: 안정 L-Point 유인 보너스
+let lgrgBonus = 0;
+if (obs.lgrgType === 'L4' || obs.lgrgType === 'L5') {
+    // 안정 L-point에 가까울수록 보상
+    lgrgBonus = (1 / (1 + obs.lgrgDist)) * 1.5; 
+}
+
+// 3. 페널티: 충돌 예상 시간 페널티 (TTI)
+let ttiPenalty = 0;
+if (obs.collisionTTI < 5.0) { // TTI가 5초 미만일 때 적용
+    ttiPenalty = (1 / obs.collisionTTI) * 10.0;
+}
+
+// 4. 페널티: 평면 이탈 제곱 페널티
+const inclinationSquaredPenalty = (obs.pos.y * obs.pos.y) + (obs.vel.y * obs.vel.y);
+// D. 위험 관리 및 가속 제어 (Risk Management & Delta V Budgeting)
+
+const progress = (ship.prevGoalDist ?? obs.dist) - obs.dist;
+const risk = obs.collisionRisk;
+const fuelRatio = ship.lastFuelUsed / (ship.maxThrust * dt); // 추력 비율 역산
+
+// 1. 핵심 보상: 거리당 위험 회피 (안전 경로 보너스)
+let safeProgressBonus = progress * 15;
+if (risk > 0.01) {
+    // 위험도가 높을 때 (1/risk^2)는 페널티로 작용하여 보상이 감소
+    safeProgressBonus *= (1 / (risk * risk + 1)); 
+} else {
+    // 위험도가 0일 때 보상 증폭
+    safeProgressBonus *= 1.2; 
+}
+
+// 2. 보조 보상: 중력 이탈 보너스 (탈출 가속)
+// gravVelDot이 -1에 가까울 때 (속도와 중력이 반대일 때) 보너스
+const escapeBonus = Math.abs(obs.gravVelDot - (-1)) * -1.0 * 2.0;
+
+// 3. 페널티: 위험도 제곱 페널티
+const riskSquaredPenalty = (risk * risk) * 30.0;
+
+// 4. 페널티: 과잉 추력 페널티
+let excessiveThrustPenalty = 0;
+const maxAllowedRatio = 0.7;
+if (fuelRatio > maxAllowedRatio) {
+    excessiveThrustPenalty = (fuelRatio - maxAllowedRatio) * 10.0;
+}
 ship.totalReward +=
   progress * 15
+  safeProgressBonus 
+  + escapeBonus * dt
+  - riskSquaredPenalty * dt
+  - excessiveThrustPenalty * dt;
+  inverseDistBonus
+  + softCaptureBonus * dt
+  - gravSquaredPenalty * dt
+  - jitterPenalty * dt;
+  efficiencyBonus
+  + alignmentBonus * dt
+  - kineticPenalty * dt
+  - timePenalty * dt;
+  + alignmentBonus * dt
+  - jitterPenalty * dt
   - ship.lastFuelUsed * 20
   - dt * 0.4
   - planePenalty * dt
+  - inclinationPenalty * dt // 새로운 페널티 적용
   - gravPenalty  * dt;
 
 ship.prevGoalDist = obs.dist;
@@ -1117,15 +1259,146 @@ function stepSAC(ship,dt){
     dir:baseDir,
     fuelRatio:0.5
   },dt);
-  const progress = (ship.prevGoalDist ?? obs.dist) - obs.dist;
+const progress = (ship.prevGoalDist ?? obs.dist) - obs.dist;
+// === [개선 사항: Y축 속도(Vy) 포함 궤도 평면 페널티] ===
+const yPosPenalty = Math.abs(ship.pos.y) * 0.025; // Y축 위치에 대한 페널티
+const yVelPenalty = Math.abs(ship.vel.y) * 1.5;   // Y축 속도에 대한 페널티 (Vy가 클수록 강함)
+const inclinationPenalty = yPosPenalty + yVelPenalty; // 새로운 결합 페널티
+// === [개선 사항: 속도 벡터 정렬 보너스] ===
+const alignmentBonus = obs.targetVelDot * 1.8;
+// === [개선 사항: 추력 벡터 떨림 페널티] ===
+const lastDir = ship.lastActionDir || new THREE.Vector3(1, 0, 0); // 초기값 설정
+const currentDir = (ship.activeShip ? ship.lastActionDir : bestDir).clone().normalize(); // PETS는 bestDir 사용
+const angleRad = lastDir.angleTo(currentDir); // 이전 방향과 현재 방향 사이의 각도(라디안)
+
+// 각도의 제곱에 비례하여 페널티: 큰 변화에 더 큰 페널티
+const jitterPenalty = angleRad * angleRad * 20.0;
 const planePenalty = Math.abs(ship.pos.y) * 0.025;
 const gravPenalty  = obs.grav.length() * 4.0;
+// 1. 핵심 보상: 거리당 연료 효율 (progress / fuelUsed)
+let efficiencyBonus = 0;
+if (fuelPenalty > 0.001) {
+    // 연료 소모가 있을 때, 단위 연료당 거리 근접 보너스
+    efficiencyBonus = (progress / fuelPenalty) * 10.0;
+} else if (progress > 0) {
+    // 연료 소모 없이 거리가 가까워지면 큰 보너스 (중력 도움 등)
+    efficiencyBonus = progress * 15.0; 
+}
 
+// 2. 보조 보상: 목표 속도 정렬 보너스 (targetVelDot: 속도와 목표 방향 내적)
+const alignmentBonus = obs.targetVelDot * 5.0; 
+
+// 3. 페널티: 과도한 운동 에너지 (KE) 페널티
+const kineticPenalty = obs.kinetic * 0.005;
+
+// 4. 페널티: 강한 시간 페널티
+const timePenalty = 0.8;
+/ B. 최종 접근 및 소프트 캡처 (Terminal Phase & Soft Capture)
+
+const dist = obs.dist;
+const velMag = obs.vel.length();
+const gravMag = obs.grav.length();
+
+// 1. 핵심 보상: 거리 역제곱 보너스 (Final Approach Bonus)
+let inverseDistBonus = 0;
+if (dist > 0.01) {
+    inverseDistBonus = (1 / (dist * dist)) * 5000.0;
+}
+
+// 2. 보조 보상: 저속 접근 보너스 (Soft Capture Bonus)
+let softCaptureBonus = 0;
+if (dist < 10) { 
+    // 목표 근처에서만 적용
+    softCaptureBonus = (1 / (1 + velMag)) * 5.0;
+}
+
+// 3. 페널티: 중력 가속도 제곱 페널티
+const gravSquaredPenalty = (gravMag * gravMag) * 0.5;
+
+// 4. 페널티: 추력 벡터 떨림 페널티 (Jitter Penalty)
+const lastDir = ship.lastActionDir || new THREE.Vector3(1, 0, 0); 
+const currentDir = /* PETS: bestDir, SAC: baseDir */ baseDir.clone().normalize(); 
+const angleRad = lastDir.angleTo(currentDir);
+const jitterPenalty = angleRad * angleRad * 50.0;
+// C. 전략적 경유지 활용 (Gravity Assist & L-Point Flyby)
+
+// GA 보너스 (GA가 임시 목표로 설정된 후 성공적으로 접근했을 때)
+let gaFlybyReward = 0;
+if (obs.gaAvailable && obs.distToGA < gaOpportunity.flybyRadius * 1.5) {
+    // GA 플라이바이 지점을 통과한 것으로 간주하여 일회성 큰 보상 부여
+    gaFlybyReward = 20.0; 
+    // 에이전트가 이 보상을 받은 후 즉시 GA 기회 플래그를 꺼야 함 (RL 환경에서 처리 필요)
+}
+
+// 2. 보조 보상: 안정 L-Point 유인 보너스
+let lgrgBonus = 0;
+if (obs.lgrgType === 'L4' || obs.lgrgType === 'L5') {
+    // 안정 L-point에 가까울수록 보상
+    lgrgBonus = (1 / (1 + obs.lgrgDist)) * 1.5; 
+}
+
+// 3. 페널티: 충돌 예상 시간 페널티 (TTI)
+let ttiPenalty = 0;
+if (obs.collisionTTI < 5.0) { // TTI가 5초 미만일 때 적용
+    ttiPenalty = (1 / obs.collisionTTI) * 10.0;
+}
+
+// 4. 페널티: 평면 이탈 제곱 페널티
+const inclinationSquaredPenalty = (obs.pos.y * obs.pos.y) + (obs.vel.y * obs.vel.y);
+// D. 위험 관리 및 가속 제어 (Risk Management & Delta V Budgeting)
+
+const progress = (ship.prevGoalDist ?? obs.dist) - obs.dist;
+const risk = obs.collisionRisk;
+const fuelRatio = ship.lastFuelUsed / (ship.maxThrust * dt); // 추력 비율 역산
+
+// 1. 핵심 보상: 거리당 위험 회피 (안전 경로 보너스)
+let safeProgressBonus = progress * 15;
+if (risk > 0.01) {
+    // 위험도가 높을 때 (1/risk^2)는 페널티로 작용하여 보상이 감소
+    safeProgressBonus *= (1 / (risk * risk + 1)); 
+} else {
+    // 위험도가 0일 때 보상 증폭
+    safeProgressBonus *= 1.2; 
+}
+
+// 2. 보조 보상: 중력 이탈 보너스 (탈출 가속)
+// gravVelDot이 -1에 가까울 때 (속도와 중력이 반대일 때) 보너스
+const escapeBonus = Math.abs(obs.gravVelDot - (-1)) * -1.0 * 2.0;
+
+// 3. 페널티: 위험도 제곱 페널티
+const riskSquaredPenalty = (risk * risk) * 30.0;
+
+// 4. 페널티: 과잉 추력 페널티
+let excessiveThrustPenalty = 0;
+const maxAllowedRatio = 0.7;
+if (fuelRatio > maxAllowedRatio) {
+    excessiveThrustPenalty = (fuelRatio - maxAllowedRatio) * 10.0;
+}
+  
 ship.totalReward +=
-  progress * 10
-  - ship.lastFuelUsed * 10
-  - dt * 0.3
+  progress * 15
+  safeProgressBonus 
+  + escapeBonus * dt
+  - riskSquaredPenalty * dt
+  - excessiveThrustPenalty * dt;
+  gaFlybyReward // 일회성 큰 보상
+  + lgrgBonus * dt
+  - ttiPenalty * dt
+  - inclinationSquaredPenalty * 0.1 * dt;
+  inverseDistBonus
+  + softCaptureBonus * dt
+  - gravSquaredPenalty * dt
+  - jitterPenalty * dt;
+  efficiencyBonus
+  + alignmentBonus * dt
+  - kineticPenalty * dt
+  - timePenalty * dt;
+  + alignmentBonus * dt
+  - ship.lastFuelUsed * 20
+  - dt * 0.4
   - planePenalty * dt
+  - jitterPenalty * dt
+  - inclinationPenalty * dt
   - gravPenalty  * dt;
 
 ship.prevGoalDist = obs.dist;
@@ -1770,6 +2043,7 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
+
 
 
 
