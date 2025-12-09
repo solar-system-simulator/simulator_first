@@ -119,8 +119,7 @@
       max-width: 260px;
       max-height: 30vh;
       overflow-y: auto;
-      z-index: 10;
-    }
+      z-index: 10;ㅍ    }
     #sideLog h3 {
       margin: 0 0 4px;
       font-size: 12px;
@@ -1043,18 +1042,29 @@ function stepPETS(ship, dt) {
     fuelRatio: 0.7
   }, dt);
 
-  const progress = (ship.prevGoalDist ?? obs.dist) - obs.dist;
-  const planePenalty = Math.abs(ship.pos.y) * 0.03;
-  const gravPenalty  = obs.grav.length() * 6.0;
-  ship.totalReward += progress * 15
-                    - ship.lastFuelUsed * 20
-                    - dt * 0.4
-                    - planePenalty * dt
-                    - gravPenalty  * dt;
-  ship.prevGoalDist = obs.dist;
+const progress = (ship.prevGoalDist ?? obs.dist) - obs.dist;
+const planePenalty = Math.abs(ship.pos.y) * 0.03;
+const gravPenalty  = obs.grav.length() * 6.0;
 
-  document.getElementById('petsFuel').textContent = (ship.fuel*100).toFixed(1);
-  document.getElementById('petsRew').textContent = ship.totalReward.toFixed(1);
+// ▣ L2 최적화(연료 아끼기)
+const fuelEfficiencyReward = -ship.lastFuelUsed * 12;
+
+// ▣ 스윙바이 보상 (속도 증가량 체크)
+const swingBoost = Math.max(0, ship.vel.length() - (ship.prevSpeed ?? ship.vel.length()));
+const slingshotReward = swingBoost * 6.0;
+ship.prevSpeed = ship.vel.length();
+
+// 최종 Reward 합산
+ship.totalReward +=
+      progress * 15
+    - ship.lastFuelUsed * 20
+    - dt * 0.4
+    - planePenalty * dt
+    - gravPenalty  * dt
+    + fuelEfficiencyReward
+    + slingshotReward;
+
+ship.prevGoalDist = obs.dist;
 }
 
 function stepSAC(ship, dt) {
@@ -1093,17 +1103,28 @@ function stepSAC(ship, dt) {
   }, dt);
 
   const progress = (ship.prevGoalDist ?? obs.dist) - obs.dist;
-  const planePenalty = Math.abs(ship.pos.y) * 0.025;
-  const gravPenalty  = obs.grav.length() * 4.0;
-  ship.totalReward += progress * 10
-                    - ship.lastFuelUsed * 10
-                    - dt * 0.3
-                    - planePenalty * dt
-                    - gravPenalty * dt;
-  ship.prevGoalDist = obs.dist;
+const planePenalty = Math.abs(ship.pos.y) * 0.03;
+const gravPenalty  = obs.grav.length() * 6.0;
 
-  document.getElementById('sacFuel').textContent = (ship.fuel*100).toFixed(1);
-  document.getElementById('sacRew').textContent = ship.totalReward.toFixed(1);
+// ▣ L2 최적화(연료 아끼기)
+const fuelEfficiencyReward = -ship.lastFuelUsed * 12;
+
+// ▣ 스윙바이 보상 (속도 증가량 체크)
+const swingBoost = Math.max(0, ship.vel.length() - (ship.prevSpeed ?? ship.vel.length()));
+const slingshotReward = swingBoost * 6.0;
+ship.prevSpeed = ship.vel.length();
+
+// 최종 Reward 합산
+ship.totalReward +=
+      progress * 15
+    - ship.lastFuelUsed * 20
+    - dt * 0.4
+    - planePenalty * dt
+    - gravPenalty  * dt
+    + fuelEfficiencyReward
+    + slingshotReward;
+
+ship.prevGoalDist = obs.dist;
 }
 
 // =================================================================
@@ -1704,6 +1725,7 @@ requestAnimationFrame(tick);
 
 </body>
 </html>
+
 
 
 
