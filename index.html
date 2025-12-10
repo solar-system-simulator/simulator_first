@@ -1075,7 +1075,7 @@ const progress = (ship.prevGoalDist ?? obs.dist) - obs.dist;
 const yPosPenalty = Math.abs(ship.pos.y) * 0.025; // Y축 위치에 대한 페널티
 const yVelPenalty = Math.abs(ship.vel.y) * 1.5;   // Y축 속도에 대한 페널티 (Vy가 클수록 강함)
 // === [개선 사항: 속도 벡터 정렬 보너스] ===
-const alignmentBonus = obs.targetVelDot * 1.8;
+//const alignmentBonus = obs.targetVelDot * 1.8;
 const inclinationPenalty = yPosPenalty + yVelPenalty; // 새로운 결합 페널티
 
 // 평면에서 너무 멀리 벗어나면 페널티 (y 축으로 너무 도망가는 것 방지)
@@ -2043,6 +2043,7 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
+
 
 
 
