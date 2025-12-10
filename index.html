@@ -1089,7 +1089,7 @@ const gravPenalty  = obs.grav.length() * 6.0;
 // const angleRad = lastDir.angleTo(currentDir); // 이전 방향과 현재 방향 사이의 각도(라디안)
 
 // 각도의 제곱에 비례하여 페널티: 큰 변화에 더 큰 페널티
-const jitterPenalty = angleRad * angleRad * 20.0;
+// const jitterPenalty = angleRad * angleRad * 20.0;
 // 1. 핵심 보상: 거리당 연료 효율 (progress / fuelUsed)
 let efficiencyBonus = 0;
 if (fuelPenalty > 0.001) {
@@ -1272,7 +1272,7 @@ const alignmentBonus = obs.targetVelDot * 1.8;
 // const angleRad = lastDir.angleTo(currentDir); // 이전 방향과 현재 방향 사이의 각도(라디안)
 
 // 각도의 제곱에 비례하여 페널티: 큰 변화에 더 큰 페널티
-const jitterPenalty = angleRad * angleRad * 20.0;
+// const jitterPenalty = angleRad * angleRad * 20.0;
 const planePenalty = Math.abs(ship.pos.y) * 0.025;
 const gravPenalty  = obs.grav.length() * 4.0;
 // 1. 핵심 보상: 거리당 연료 효율 (progress / fuelUsed)
@@ -2043,6 +2043,7 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
+
 
 
 
