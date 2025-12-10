@@ -302,41 +302,6 @@ function updateCam() {
 }
 updateCam();
 
-//python 액션 전송
-let wsPETS = null;
-let wsSAC = null;
-
-const RL_URL = "ws://127.0.0.1:8000/ws";
-
-function connectRL(policyType) {
-  const ws = new WebSocket(RL_URL);
-
-  ws.onopen = () => {
-    console.log(policyType, "WebSocket 연결됨");
-  };
-
-  ws.onmessage = (e) => {
-    const data = JSON.parse(e.data);
-    if (!data.action || !activeShips[policyType]) return;
-
-    activeShips[policyType].pendingAction = data.action;
-  };
-
-  ws.onerror = (err) => console.error("WS Error:", err);
-  ws.onclose = () => console.warn(policyType, "WebSocket 닫힘");
-
-  return ws;
-}
-
-wsPETS = connectRL("PETS");
-wsSAC  = connectRL("SAC");
-
-const activeShips = {
-  PETS: null,
-  SAC: null,
-};
-
-
 /* ========== 시간 / 상수 ========== */
 let simDate   = new Date('2025-01-01T00:00:00Z');
 let timeScale = 0.3;
@@ -2058,6 +2023,7 @@ function sendObservationToServer(ship, policyType) {
 </script>
 </body>
 </html>
+
 
 
 
