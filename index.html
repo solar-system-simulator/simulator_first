@@ -598,6 +598,10 @@ function computeGravitationalAccelerationRaw(pos) {
   }
   return acc;
 }
+const activeShips = {
+  PETS: null,
+  SAC: null,
+};
 
 // 예측용: 미래 시점(ghostDays)에 행성들이 어디 있는지 기준으로 중력 계산
 function computeGravitationalAccelerationGhost(pos, ghostDays) {
@@ -2023,7 +2027,3 @@ function sendObservationToServer(ship, policyType) {
 </script>
 </body>
 </html>
-
-
-
-
