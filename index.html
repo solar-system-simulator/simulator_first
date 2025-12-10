@@ -1226,10 +1226,13 @@ function stepPETS(ship,dt){
         efficiencyBonus 
         + progress * 15 // 기본 근접 보상
         + alignmentBonus * dt
+        + angleAlignBonus * dt
         
         // 2. 최종 접근 및 정밀 제어
         + inverseDistBonus
         + softCaptureBonus * dt
+        + predictedTargetBonus
+        + decelApproachBonus * dt
         
         // 3. 전략적 기동
         + gaFlybyReward
@@ -1250,8 +1253,6 @@ function stepPETS(ship,dt){
         - jitterPenalty * dt
         - riskSquaredPenalty * dt
         - excessiveThrustPenalty * dt
-        + predictedTargetBonus
-        + decelApproachBonus * dt
         - velMatchPenalty * dt
         - ttiPenalty * dt;
 
@@ -1381,10 +1382,13 @@ function stepPETS(ship,dt){
         efficiencyBonus 
         + progress * 15 // 기본 근접 보상
         + alignmentBonus * dt
+        + angleAlignBonus * dt
         
         // 2. 최종 접근 및 정밀 제어
         + inverseDistBonus
         + softCaptureBonus * dt
+        + predictedTargetBonus
+        + decelApproachBonus * dt
 
         // 3. 전략적 기동
         + gaFlybyReward
@@ -1406,10 +1410,8 @@ function stepPETS(ship,dt){
         - riskSquaredPenalty * dt
         - excessiveThrustPenalty * dt
         - ttiPenalty * dt
-        - obs.grav.length() * 4.0 * dt; // SAC 고유의 중력 페널티
-        + predictedTargetBonus
-        + decelApproachBonus * dt
-        - velMatchPenalty * dt
+        - obs.grav.length() * 4.0 * dt // SAC 고유의 중력 페널티
+        - velMatchPenalty * dt;
 
     ship.prevGoalDist = obs.dist;
 
@@ -2040,4 +2042,5 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
+
 
