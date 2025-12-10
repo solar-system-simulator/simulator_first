@@ -241,6 +241,28 @@
 
 <script src="./three.min.js"></script>
 <script>
+// Vector3.sub()가 undefined를 받아도 죽지 않도록 보호막을 씌움
+(function () {
+  const oldSub = THREE.Vector3.prototype.sub;
+  THREE.Vector3.prototype.sub = function (v) {
+    if (!v) {
+      console.warn("Vector3.sub called with undefined, ignore this call");
+      return this;
+    }
+    return oldSub.call(this, v);
+  };
+
+  const oldSubVectors = THREE.Vector3.prototype.subVectors;
+  THREE.Vector3.prototype.subVectors = function (a, b) {
+    if (!a || !b) {
+      console.warn("Vector3.subVectors called with undefined, ignore this call");
+      return this;
+    }
+    return oldSubVectors.call(this, a, b);
+  };
+})();
+</script>
+<script>
 /* ========== 기본 Three.js 세팅 ========== */
 const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -2042,5 +2064,4 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
-
 
