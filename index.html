@@ -2005,7 +2005,7 @@ let wsPETS = null;
 let wsSAC = null;
 
 // RL 서버 주소
-const RL_URL = "ws://127.0.0.1:8000/ws";
+const RL_URL = "ws://172.30.1.91:8000/ws";
 
 function connectRL(policyType) {
   const ws = new WebSocket(RL_URL);
@@ -2055,10 +2055,9 @@ function sendObservationToServer(ship, policyType) {
 
   ws.send(JSON.stringify(msg));
 }
-
-  
 </script>
 </body>
 </html>
+
 
 
