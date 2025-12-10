@@ -1084,9 +1084,9 @@ const planePenalty = Math.abs(ship.pos.y) * 0.03;
 // 중력이 강한 구역(태양 근처)에 있을수록 페널티
 const gravPenalty  = obs.grav.length() * 6.0;
 // === [개선 사항: 추력 벡터 떨림 페널티] ===
-const lastDir = ship.lastActionDir || new THREE.Vector3(1, 0, 0); // 초기값 설정
-const currentDir = (ship.activeShip ? ship.lastActionDir : bestDir).clone().normalize(); // PETS는 bestDir 사용
-const angleRad = lastDir.angleTo(currentDir); // 이전 방향과 현재 방향 사이의 각도(라디안)
+// const lastDir = ship.lastActionDir || new THREE.Vector3(1, 0, 0); // 초기값 설정
+// const currentDir = (ship.activeShip ? ship.lastActionDir : bestDir).clone().normalize(); // PETS는 bestDir 사용
+// const angleRad = lastDir.angleTo(currentDir); // 이전 방향과 현재 방향 사이의 각도(라디안)
 
 // 각도의 제곱에 비례하여 페널티: 큰 변화에 더 큰 페널티
 const jitterPenalty = angleRad * angleRad * 20.0;
@@ -1267,9 +1267,9 @@ const inclinationPenalty = yPosPenalty + yVelPenalty; // 새로운 결합 페널
 // === [개선 사항: 속도 벡터 정렬 보너스] ===
 const alignmentBonus = obs.targetVelDot * 1.8;
 // === [개선 사항: 추력 벡터 떨림 페널티] ===
-const lastDir = ship.lastActionDir || new THREE.Vector3(1, 0, 0); // 초기값 설정
-const currentDir = (ship.activeShip ? ship.lastActionDir : bestDir).clone().normalize(); // PETS는 bestDir 사용
-const angleRad = lastDir.angleTo(currentDir); // 이전 방향과 현재 방향 사이의 각도(라디안)
+// const lastDir = ship.lastActionDir || new THREE.Vector3(1, 0, 0); // 초기값 설정
+// const currentDir = (ship.activeShip ? ship.lastActionDir : bestDir).clone().normalize(); // PETS는 bestDir 사용
+// const angleRad = lastDir.angleTo(currentDir); // 이전 방향과 현재 방향 사이의 각도(라디안)
 
 // 각도의 제곱에 비례하여 페널티: 큰 변화에 더 큰 페널티
 const jitterPenalty = angleRad * angleRad * 20.0;
@@ -2043,6 +2043,7 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
+
 
 
 
