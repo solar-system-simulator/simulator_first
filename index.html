@@ -1197,7 +1197,27 @@ function stepPETS(ship,dt){
     const escapeBonus = Math.abs(obs.gravVelDot - (-1)) * -1.0 * 2.0;
     const riskSquaredPenalty = (risk * risk) * 30.0;
     let excessiveThrustPenalty = fuelRatio > 0.7 ? (fuelRatio - 0.7) * 10.0 : 0;
-    
+
+    // 1) 목표 미래 예측 위치 접근 보상
+    const prevPredDist = ship.prevPredDist ?? obs.predDist;
+    const predProgress = prevPredDist - obs.predDist;
+    const predictedTargetBonus = predProgress * 20.0;
+    ship.prevPredDist = obs.predDist;
+
+    // 2) 목표 행성 속도와의 속도 차이 최소화 보상 (정밀 착륙)
+    const velDiff = obs.vel.clone().sub(obs.targetVel).length();
+    const velMatchPenalty = velDiff * 2.5;
+
+    // 3) 목표 방향 각도 기반 정렬 보상 (추가 정확도 상승)
+    const angleToTarget = obs.velDirAngle; // obs.toTarget 과 obs.vel 의 각도
+    const angleAlignBonus = (Math.PI - angleToTarget) * 3.0;
+
+    // 4) 목표 근처에서 감속 접근 보너스 (스쳐 지나가는 문제 해결)
+    let decelApproachBonus = 0;
+    if (dist < 12 && dist > 4) {
+        decelApproachBonus = (1 / (velMag + 0.1)) * 4.0;
+    }
+  
     
     // === 🌟🌟🌟 최종 보상 합산 (문법 오류 수정 및 통합) 🌟🌟🌟
     // 가장 강력한 보상들을 기반으로 합산하고 중복된 기본 페널티 제거
@@ -1230,6 +1250,9 @@ function stepPETS(ship,dt){
         - jitterPenalty * dt
         - riskSquaredPenalty * dt
         - excessiveThrustPenalty * dt
+        + predictedTargetBonus
+        + decelApproachBonus * dt
+        - velMatchPenalty * dt
         - ttiPenalty * dt;
 
     ship.prevGoalDist = obs.dist;
@@ -1331,7 +1354,25 @@ function stepPETS(ship,dt){
     const escapeBonus = Math.abs(obs.gravVelDot - (-1)) * -1.0 * 2.0;
     const riskSquaredPenalty = (risk * risk) * 30.0;
     let excessiveThrustPenalty = fuelRatio > 0.7 ? (fuelRatio - 0.7) * 10.0 : 0;
-    
+    // 1) 목표 미래 예측 위치 접근 보상
+    const prevPredDist = ship.prevPredDist ?? obs.predDist;
+    const predProgress = prevPredDist - obs.predDist;
+    const predictedTargetBonus = predProgress * 20.0;
+    ship.prevPredDist = obs.predDist;
+
+    // 2) 목표 행성 속도와의 속도 차이 최소화 보상 (정밀 착륙)
+    const velDiff = obs.vel.clone().sub(obs.targetVel).length();
+    const velMatchPenalty = velDiff * 2.5;
+
+    // 3) 목표 방향 각도 기반 정렬 보상 (추가 정확도 상승)
+    const angleToTarget = obs.velDirAngle; // obs.toTarget 과 obs.vel 의 각도
+    const angleAlignBonus = (Math.PI - angleToTarget) * 3.0;
+
+    // 4) 목표 근처에서 감속 접근 보너스 (스쳐 지나가는 문제 해결)
+    let decelApproachBonus = 0;
+    if (dist < 12 && dist > 4) {
+        decelApproachBonus = (1 / (velMag + 0.1)) * 4.0;
+    }
     
     // === 🌟🌟🌟 최종 보상 합산 (문법 오류 수정 및 통합) 🌟🌟🌟
     // 가장 강력한 보상들을 기반으로 합산하고 중복된 기본 페널티 제거
@@ -1344,7 +1385,7 @@ function stepPETS(ship,dt){
         // 2. 최종 접근 및 정밀 제어
         + inverseDistBonus
         + softCaptureBonus * dt
-        
+
         // 3. 전략적 기동
         + gaFlybyReward
         + lgrgBonus * dt
@@ -1366,6 +1407,9 @@ function stepPETS(ship,dt){
         - excessiveThrustPenalty * dt
         - ttiPenalty * dt
         - obs.grav.length() * 4.0 * dt; // SAC 고유의 중력 페널티
+        + predictedTargetBonus
+        + decelApproachBonus * dt
+        - velMatchPenalty * dt
 
     ship.prevGoalDist = obs.dist;
 
@@ -1996,3 +2040,4 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
+
