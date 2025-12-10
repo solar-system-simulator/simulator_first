@@ -599,6 +599,41 @@ function computeGravitationalAccelerationRaw(pos) {
   return acc;
 }
 
+// 예측용: 미래 시점(ghostDays)에 행성들이 어디 있는지 기준으로 중력 계산
+function computeGravitationalAccelerationGhost(pos, ghostDays) {
+  const acc = new THREE.Vector3();
+
+  for (const b of heavyBodies) {
+    // 공전하는 행성은 미래 위치, 태양처럼 orbitPeriodDays=0 인 애들은 현재 위치
+    let bp;
+    if (b.orbitPeriodDays && b.orbitPeriodDays > 0) {
+      bp = getFuturePlanetPos(b, ghostDays);
+    } else {
+      bp = b.pivot.getWorldPosition(new THREE.Vector3());
+    }
+
+    const rVec = new THREE.Vector3().subVectors(bp, pos);
+    const r    = rVec.length();
+    if (r === 0) continue;
+
+    const baseR = b.mesh.geometry.parameters.radius || 1;
+    let maxRangeMul = 16;
+    let effMass     = b.mass;
+    if (b.name === '태양') effMass *= 0.0002;
+
+    const rMax = baseR * maxRangeMul;
+    if (r > rMax) continue;
+
+    const r2 = Math.max(100, r * r);
+    let accMag = (G * effMass) / r2;
+    if (accMag > MAX_ACC) accMag = MAX_ACC;
+
+    acc.addScaledVector(rVec.normalize(), accMag);
+  }
+  return acc;
+}
+
+
 function computeGravitationalAcceleration(pos) {
   const acc = new THREE.Vector3();
   for (const b of heavyBodies) {
@@ -829,8 +864,8 @@ function spawnSpaceshipSimple(pos, vel, policyType, color) {
     vel: vel.clone(),
     mass: 0.05,
     radius: 0.4,
-    fuel: 10.0,
-    maxThrust: 5,
+    fuel: 2.0,
+    maxThrust: 0.25,
     lastFuelUsed:0,
     prevGoalDist:null,
     totalReward:0,
@@ -1442,121 +1477,154 @@ function stepPETS(ship,dt){
 }
 
 // === 예상 궤도 예측 (3D, 움직이는 목표 + 중력 반영) ===
-function predictTrajectory(ship, policyType, steps = 220, dtSec = 0.35) {
-  const pts = [];
-  let pos   = ship.pos.clone();
-  let vel   = ship.vel.clone();
-  let fuel  = ship.fuel;
+function predictTrajectory(ship, policyType, steps = 900, dtSec = 0.175) {
+  const pts = [];
+  let pos  = ship.pos.clone();
+  let vel  = ship.vel.clone();
+  let fuel = ship.fuel;
 
-    // 1. 경로 시작점 추가 (시각화를 위해 필수)
-    pts.push(pos.clone()); 
+  // 시작점
+  pts.push(pos.clone());
 
-  // 어떤 행성을 목표로 하는지
-  const targetName = document.getElementById("autoTarget").value;
-  const targetBody = bodies[targetName];
-    if (!targetBody) return pts; 
-    
-  const initialGAA = getGravityAssistOpportunity(ship, targetBody.name);
-  let isExecutingGA = !!initialGAA;
-  let gaFlybyPos = initialGAA ? initialGAA.body.pivot.getWorldPosition(new THREE.Vector3())
-      .addScaledVector(initialGAA.approachVector, initialGAA.flybyRadius) : null;
+  const targetName = document.getElementById("autoTarget").value;
+  const targetBody = bodies[targetName];
+  if (!targetBody) return pts;
 
-  // 예측용 “유령 시간”
-  let ghostDays = 0;
-  const daysPerSec = Math.max(0.5, timeScale || 1); 
-    
-    // 정책별 기본 추력 비율 설정
-    const baseFuelRatio = policyType === "PETS" ? 0.7 : 0.5;
+  // 행성 반지름 기반 도달 기준
+  const targetRadius = targetBody.mesh.geometry.parameters.radius || 1;
+  const successDist  = targetRadius * 3;
 
-  for (let i = 0; i < steps; i++) {
-    const dDays = dtSec * daysPerSec;
-    ghostDays += dDays;
+  // 초기 중력보조(GA) 정보
+  const initialGAA = getGravityAssistOpportunity(ship, targetBody.name);
+  let isExecutingGA = !!initialGAA;
+  let gaFlybyPos = initialGAA
+    ? initialGAA.body
+        .pivot.getWorldPosition(new THREE.Vector3())
+        .addScaledVector(initialGAA.approachVector, initialGAA.flybyRadius)
+    : null;
 
-    // 이 시점의 목표 행성 위치 (공전 반영)
-    const currentTargetPos = getFuturePlanetPos(targetBody, ghostDays);
-    let effectiveTargetPos = currentTargetPos; // 유효 목표 위치 설정
+  let ghostDays   = 0;
+  const daysPerSec = Math.max(0.5, timeScale || 1);
+  const baseFuelRatio = policyType === "PETS" ? 0.7 : 0.5;
 
-    // 2. GA 실행 로직: 임시 목표 설정 및 GA 완료 체크
+  for (let i = 0; i < steps; i++) {
+    const dDays = dtSec * daysPerSec;
+    ghostDays += dDays;
+
+    // 1) 이 시점의 목표 행성 위치
+    const currentTargetPos = getFuturePlanetPos(targetBody, ghostDays);
+
+    // 2) 기본 유효 목표 = 현재 행성 위치
+    let effectiveTargetPos = currentTargetPos.clone();
+
+    // 3) GA(플라이바이) 수행 중이면 GA 포인트를 목표로 사용
     if (isExecutingGA && gaFlybyPos) {
-        if (pos.distanceTo(gaFlybyPos) < 5) {
-            isExecutingGA = false;
-        } else {
-            effectiveTargetPos = gaFlybyPos;
-        }
+      if (pos.distanceTo(gaFlybyPos) < 5) {
+        // GA 완료
+        isExecutingGA = false;
+      } else {
+        effectiveTargetPos.copy(gaFlybyPos);
+      }
     }
-    
-    const toEffectiveTarget = new THREE.Vector3().subVectors(effectiveTargetPos, pos);
-    const dist      = toEffectiveTarget.length();
-    if (dist < 1.0) break; 
 
-    // 역장 없는 순수 행성 중력
-    const g = computeGravitationalAccelerationRaw(pos);
+    // 4) GA가 아닐 때만 "선행 타겟 조준" 적용
+    if (!isExecutingGA) {
+      const futureTargetPos = getFuturePlanetPos(targetBody, ghostDays + 5); // 5일 뒤 (조절 가능)
+      let orbitDir = new THREE.Vector3()
+        .subVectors(futureTargetPos, currentTargetPos)
+        .normalize();
 
-    const toDir = toEffectiveTarget.clone().normalize();
-    let dir;
+      // 만약 여전히 경로가 반대로 꺾이면 아래 한 줄을 활성화해서 방향을 뒤집어 보세요.
+      // orbitDir.multiplyScalar(-1);
 
-    // L 포인트 정보는 currentTargetPos 기준
-    const lgrgInfo = getFutureLagrangePointInfo(pos, targetBody, ghostDays);
-    const lgrgDir = lgrgInfo.toLPoint.clone().normalize();
-    const isStableLPointNearby = (lgrgInfo.type === 'L4' || lgrgInfo.type === 'L5') && lgrgInfo.dist < 20 && dist > 10;
+      const distToCurrent = pos.distanceTo(currentTargetPos);
+      const leadK   = Math.min(1.0, distToCurrent / 80);     // 멀수록 선행량 증가
+      const leadLen = (targetRadius || 1) * 4 * leadK;       // 행성 크기 기준 선행 길이
 
-    if (policyType === "PETS") {
-      // PETS 방향 결정
-      const jitter = new THREE.Vector3(
-        (Math.random() - 0.5) * 0.2,
-        (Math.random() - 0.5) * 0.2,
-        (Math.random() - 0.5) * 0.2
-      );
-      dir = toDir.clone().add(jitter);
-      if (isStableLPointNearby) {
-         dir.addScaledVector(lgrgDir, 0.3);
-      }
-      
-    } else {
-      // SAC 방향 결정
-      const velDir = vel.length() > 1e-3 ? vel.clone().normalize() : new THREE.Vector3();
-      const gravDir = g.length() > 1e-4 ? g.clone().normalize() : new THREE.Vector3();
+      effectiveTargetPos.addScaledVector(orbitDir, leadLen);
+    }
 
-      dir = new THREE.Vector3()
-        .addScaledVector(toDir,   1.0)
-        .addScaledVector(velDir, -0.4)
-        .addScaledVector(gravDir,-0.2);
+    // 5) 실제 조준 벡터 / 거리
+    const toEffectiveTarget = new THREE.Vector3()
+      .subVectors(effectiveTargetPos, pos);
+    const distToTarget = toEffectiveTarget.length();
 
-      if (isStableLPointNearby) {
-         dir.addScaledVector(lgrgDir, 0.5);
-      }
-    }
+    // 목표 근처까지 오면 종료
+    if (distToTarget < successDist) {
+      pts.push(pos.clone());
+      break;
+    }
 
-    // 방향 정규화
-    if (dir.lengthSq() > 1e-6) dir.normalize();
-    
-    // 3. 적응형 추력 비율 계산 (단 한 번만 계산)
-    let fuelRatio;
-    if (dist > 50) {
-        fuelRatio = baseFuelRatio;
-    } else if (dist > 10) {
-        fuelRatio = baseFuelRatio * (0.2 + 0.8 * (dist - 10) / 40);
-    } else {
-        fuelRatio = baseFuelRatio * 0.15;
-    }
-      
-    // 4. 추력 적용 (단 한 번만 적용)
-    const thrustOn  = fuel > 0 && dist > 1.0;
-    if (thrustOn) {
-      const thrustMag = ship.maxThrust * fuelRatio; 
-      vel.addScaledVector(dir, thrustMag * dtSec);
-      const fuelUsed = fuelRatio * dtSec * 0.6; 
-      fuel = Math.max(0, fuel - fuelUsed);
-    }
-      
-    // 5. 중력 적분 및 위치 업데이트
-    vel.addScaledVector(g, dtSec);
-    pos.addScaledVector(vel, dtSec);
+    // ★ 미래 시점(ghostDays) 기준 중력 사용
+    const g = (typeof computeGravitationalAccelerationGhost === "function")
+      ? computeGravitationalAccelerationGhost(pos, ghostDays)
+      : computeGravitationalAccelerationRaw(pos);   // 보조 함수 없으면 기존 raw 중력 사용
 
-    pts.push(pos.clone());
-  }
+    const toDir = toEffectiveTarget.clone().normalize();
+    let dir;
 
-  return pts;
+    // L 포인트 정보도 미래 기준
+    const lgrgInfo = getFutureLagrangePointInfo(pos, targetBody, ghostDays);
+    const lgrgDir  = lgrgInfo.toLPoint.clone().normalize();
+    const isStableLPointNearby =
+      (lgrgInfo.type === "L4" || lgrgInfo.type === "L5") &&
+      lgrgInfo.dist < 20 &&
+      distToTarget > 10;
+
+    if (policyType === "PETS") {
+      const jitter = new THREE.Vector3(
+        (Math.random() - 0.5) * 0.2,
+        (Math.random() - 0.5) * 0.2,
+        (Math.random() - 0.5) * 0.2
+      );
+      dir = toDir.clone().add(jitter);
+      if (isStableLPointNearby) {
+        dir.addScaledVector(lgrgDir, 0.3);
+      }
+    } else {
+      const velDir =
+        vel.length() > 1e-3 ? vel.clone().normalize() : new THREE.Vector3();
+      const gravDir =
+        g.length() > 1e-4 ? g.clone().normalize() : new THREE.Vector3();
+
+      dir = new THREE.Vector3()
+        .addScaledVector(toDir,   1.0)
+        .addScaledVector(velDir, -0.4)
+        .addScaledVector(gravDir,-0.2);
+
+      if (isStableLPointNearby) {
+        dir.addScaledVector(lgrgDir, 0.5);
+      }
+    }
+
+    if (dir.lengthSq() > 1e-6) dir.normalize();
+
+    // 거리 기반 추력 비율 (목표와의 거리 기준)
+    let fuelRatio;
+    if (distToTarget > 50) {
+      fuelRatio = baseFuelRatio;
+    } else if (distToTarget > 10) {
+      fuelRatio = baseFuelRatio * (0.2 + 0.8 * (distToTarget - 10) / 40);
+    } else {
+      fuelRatio = baseFuelRatio * 0.15;
+    }
+
+    const thrustOn = fuel > 0 && distToTarget > targetRadius * 1.2;
+    if (thrustOn) {
+      const thrustMag = ship.maxThrust * fuelRatio;
+      vel.addScaledVector(dir, thrustMag * dtSec);
+      const fuelUsed = fuelRatio * dtSec * 0.6;
+      fuel = Math.max(0, fuel - fuelUsed);
+    }
+
+    // 중력 / 위치 업데이트
+    vel.addScaledVector(g, dtSec);
+    pos.addScaledVector(vel, dtSec);
+
+    pts.push(pos.clone());
+  }
+
+  return pts;
 }
 
 let petsPathLine=null, sacPathLine=null;
@@ -2064,5 +2132,4 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
-
 
