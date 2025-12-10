@@ -698,16 +698,60 @@ function getRLTargetPos() {
 
 function getObservation(ship) {
   const targetPos = getRLTargetPos();
-  const g = computeGravitationalAcceleration(ship.pos);
+  const g        = computeGravitationalAcceleration(ship.pos);
   const toTarget = new THREE.Vector3().subVectors(targetPos, ship.pos);
-  const dist = toTarget.length();
-  const vel = ship.vel.clone();
-  const ke = 0.5 * ship.mass * vel.lengthSq();
-  const pe = computePotentialEnergy(ship.pos, ship.mass);
-  const totalE = ke + pe;
-  const angMom = ship.pos.clone().cross(vel);
+  const dist     = toTarget.length();
+  const vel      = ship.vel.clone();
+
+  const ke       = 0.5 * ship.mass * vel.lengthSq();
+  const pe       = computePotentialEnergy(ship.pos, ship.mass);
+  const totalE   = ke + pe;
+  const angMom   = ship.pos.clone().cross(vel);
   const collisionRisk = computeCollisionRisk(ship.pos);
   const warpInfo      = computeWarpFieldInfo(ship.pos);
+
+  // ---- 여기서부터 추가 계산 ----
+
+  // 1) 목표 방향과 속도 방향의 내적 (정렬도)
+  let targetVelDot = 0;
+  if (vel.lengthSq() > 1e-8 && dist > 1e-8) {
+    const vNorm  = vel.clone().normalize();
+    const tNorm  = toTarget.clone().normalize();
+    targetVelDot = vNorm.dot(tNorm);   // 1에 가까우면 "목표 방향과 잘 정렬"
+  }
+
+  // 2) 중력 가속도와 속도 벡터의 내적 (중력선 타는 정도)
+  let gravVelDot = 0;
+  if (vel.lengthSq() > 1e-8 && g.lengthSq() > 1e-8) {
+    const vNorm = vel.clone().normalize();
+    const gNorm = g.clone().normalize();
+    gravVelDot  = vNorm.dot(gNorm);
+  }
+
+  // 3) 라그랑주 포인트 관련(현재는 더미, 나중에 진짜 구현 가능)
+  const targetName = document.getElementById('autoTarget').value;
+  const targetBody = bodies[targetName];
+  let lgrgType = null;
+  let lgrgDist = Infinity;
+  let lgrgDir  = new THREE.Vector3(0, 0, 0);
+
+  if (targetBody && typeof getNearestLagrangePointInfo === 'function') {
+    const info = getNearestLagrangePointInfo(ship.pos, targetBody);
+    if (info) {
+      lgrgType = info.type ?? null;
+      lgrgDist = info.dist ?? Infinity;
+      if (info.toPoint instanceof THREE.Vector3) {
+        lgrgDir = info.toPoint.clone().normalize();
+      }
+    }
+  }
+
+  // 4) 충돌까지 남은 시간(지금은 미구현 상태라 무한대 처리)
+  const collisionTTI = Infinity;
+
+  // 5) GA(중력 보조) 관련 플래그 (지금은 사용 안 함)
+  const gaAvailable = false;
+  const distToGA    = Infinity;
 
   return {
     pos: ship.pos.clone(),
@@ -722,9 +766,20 @@ function getObservation(ship) {
     angMom,
     collisionRisk,
     warpInfluence: warpInfo.influence,
-    warpDir: warpInfo.dir
+    warpDir: warpInfo.dir,
+
+    // 보상식에서 쓰는 추가 항목들
+    targetVelDot,     // 목표 향해 얼마나 잘 날고 있는지
+    gravVelDot,       // 중력 방향과 속도 정렬도
+    collisionTTI,     // 충돌까지 시간(현재 더미)
+    gaAvailable,      // GA 사용 가능 여부(현재 false)
+    distToGA,         // GA 위치까지 거리(현재 무한대)
+    lgrgType,         // 'L4' / 'L5' 등 (현재 null)
+    lgrgDist,         // 라그랑주 포인트까지 거리
+    lgrgDir           // 라그랑주 포인트 방향 단위 벡터
   };
 }
+
 
 /* ========== 소행성/우주선 ========== */
 
@@ -753,7 +808,7 @@ function spawnSpaceshipSimple(pos, vel, policyType, color) {
     mass: 0.05,
     radius: 0.4,
     fuel: 1.0,
-    maxThrust: 0.22,
+    maxThrust: 1,
     lastFuelUsed:0,
     prevGoalDist:null,
     totalReward:0,
@@ -963,6 +1018,34 @@ function updateThrustParticles(dt){
     }
   }
 }
+
+// === 중력 보조(GA) / 라그랑주 포인트 관련 더미 함수 ===
+// 지금은 실제 계산은 안 하고, 고급 보상식에서 에러만 안 나게 기본값만 돌려줍니다.
+
+function getGravityAssistOpportunity(ship, targetName) {
+  // 나중에 구현하고 싶으면 여기서 GA 후보 행성, 플라이바이 반경 등을 계산하면 됨
+  return null;  // 현재는 GA 사용 안 함
+}
+
+function getNearestLagrangePointInfo(pos, targetBody) {
+  // targetBody 주위의 L4/L5 등을 찾는다고 가정하는 곳이지만
+  // 아직 구현하지 않았으므로 "없음" 상태만 돌려줌
+  return {
+    type: null,                         // 'L4' / 'L5' 등
+    dist: Infinity,                     // 매우 멈
+    toPoint: new THREE.Vector3(0,0,0)   // 방향 벡터
+  };
+}
+
+function getFutureLagrangePointInfo(pos, targetBody, ghostDays) {
+  // 미래 시점용 라그랑주 포인트 정보도 현재는 더미
+  return {
+    type: null,
+    dist: Infinity,
+    toLPoint: new THREE.Vector3(0,0,0)
+  };
+}
+
 
 /* ========== RL 액션 적용 + PETS/SAC 정책 ========== */
 function applyRLAction(ship, action, dt) {
@@ -1725,21 +1808,14 @@ function tick(now) {
       simDate.toISOString().replace("T", " ").slice(0, 19);
   }
 
-// 두 우주선(PETS, SAC) 모두를 대상으로 일정 주기로 궤도 다시 그리기
-  if (!episodeFinished) {
-    pathUpdateTimer -= dtReal;
-    if (pathUpdateTimer <= 0) {
-      if (petsShip && petsEnabled) {
-          // PETS 궤도 계산 및 그리기
-          showPredictedPath(petsShip, "PETS");
-      }
-      if (sacShip && sacEnabled) {
-          // SAC 궤도 계산 및 그리기
-          showPredictedPath(sacShip, "SAC");
-      }
-      pathUpdateTimer = 0.7; // 0.7초마다 업데이트
-    }
-  }
+  // 선택된 우주선이 있을 때, 일정 주기로 예측 궤도 다시 그리기
+  if (activeShip && !episodeFinished) {
+    pathUpdateTimer -= dtReal;
+    if (pathUpdateTimer <= 0) {
+      showPredictedPath(activeShip, activeShip.policyType);
+      pathUpdateTimer = 0.7;
+    }
+  }
 
   // 물리 시뮬레이션 스텝 (행성/우주선 모두)
   const physScale = Math.max(0, Math.min(timeScale, 100));
