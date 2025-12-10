@@ -1725,14 +1725,21 @@ function tick(now) {
       simDate.toISOString().replace("T", " ").slice(0, 19);
   }
 
-  // 선택된 우주선이 있을 때, 일정 주기로 예측 궤도 다시 그리기
-  if (activeShip && !episodeFinished) {
-    pathUpdateTimer -= dtReal;
-    if (pathUpdateTimer <= 0) {
-      showPredictedPath(activeShip, activeShip.policyType);
-      pathUpdateTimer = 0.7;
-    }
-  }
+// 두 우주선(PETS, SAC) 모두를 대상으로 일정 주기로 궤도 다시 그리기
+  if (!episodeFinished) {
+    pathUpdateTimer -= dtReal;
+    if (pathUpdateTimer <= 0) {
+      if (petsShip && petsEnabled) {
+          // PETS 궤도 계산 및 그리기
+          showPredictedPath(petsShip, "PETS");
+      }
+      if (sacShip && sacEnabled) {
+          // SAC 궤도 계산 및 그리기
+          showPredictedPath(sacShip, "SAC");
+      }
+      pathUpdateTimer = 0.7; // 0.7초마다 업데이트
+    }
+  }
 
   // 물리 시뮬레이션 스텝 (행성/우주선 모두)
   const physScale = Math.max(0, Math.min(timeScale, 100));
@@ -1913,14 +1920,3 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
