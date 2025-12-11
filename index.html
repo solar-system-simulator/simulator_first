@@ -1147,6 +1147,27 @@ function stepPETS(ship,dt){
     const lgrgInfluence = Math.min(1.0, (20 - obs.lgrgDist) / 20) * 0.4;
     baseDir.addScaledVector(obs.lgrgDir.clone().normalize(), lgrgInfluence); 
   }
+  // <<< ADDED: 샘플 궤적 상에서의 천체 근접/충돌 패널티 (강력) >>>
+  for (const name in bodies) {
+          const b = bodies[name];
+          // getWorldPosition는 pivot이 존재한다는 가정
+          const bPos = new THREE.Vector3();
+          if (b.pivot && typeof b.pivot.getWorldPosition === 'function') {
+            b.pivot.getWorldPosition(bPos);
+          } else if (b.mesh) {
+            b.mesh.getWorldPosition(bPos);
+          } else { continue; }
+          const bRadius = (b.mesh && b.mesh.geometry && b.mesh.geometry.parameters && b.mesh.geometry.parameters.radius)
+                            ? b.mesh.geometry.parameters.radius : (b.radius || 1);
+          const dd = pos.distanceTo(bPos);
+          if (dd < bRadius * 1.15) {
+            // 거의 충돌 수준이면 매우 큰 패널티로 후보 배제
+            score -= 1e6 * (1.15 - dd / (bRadius * 1.15));
+          } else if (dd < bRadius * 3.0) {
+            // 근접 주의 영역: 중간 크기 패널티
+            score -= 500 * (3.0 - dd / (bRadius * 3.0));
+          }
+      }
   // 역장/회피 보정
   if (obs.warpInfluence > 0) {
     baseDir.addScaledVector(obs.warpDir, 0.4 * obs.warpInfluence);
@@ -1555,6 +1576,33 @@ function predictTrajectory(ship, policyType, steps = 900, dtSec = 0.175) {
       break;
     }
 
+    let avoidanceVec = new THREE.Vector3(0,0,0);
+    let collisionImminent = false;
+    for (const name in bodies) {
+      const b = bodies[name];
+      const bPos = new THREE.Vector3();
+      if (b.pivot && typeof b.pivot.getWorldPosition === 'function') {
+        b.pivot.getWorldPosition(bPos);
+      } else if (b.mesh) {
+        b.mesh.getWorldPosition(bPos);
+      } else { continue; }
+      const bRadius = (b.mesh && b.mesh.geometry && b.mesh.geometry.parameters && b.mesh.geometry.parameters.radius)
+                        ? b.mesh.geometry.parameters.radius : (b.radius || 1);
+      const d = pos.distanceTo(bPos);
+      const safetyMargin = Math.max(3, bRadius * 1.2);
+      if (d < safetyMargin) {
+        const away = pos.clone().sub(bPos).normalize();
+        const strength = (safetyMargin - d) / safetyMargin; // 0..1
+        avoidanceVec.addScaledVector(away, strength * 2.0); // 강한 회피 반영
+        if (d < bRadius * 1.05) collisionImminent = true;
+      }
+    }
+    // 충돌 불가피하면 예측 궤적을 그 지점에서 종료(시각화용)
+    if (collisionImminent) {
+      pts.push(pos.clone());
+      break;
+    }
+    
     // ★ 미래 시점(ghostDays) 기준 중력 사용
     const g = (typeof computeGravitationalAccelerationGhost === "function")
       ? computeGravitationalAccelerationGhost(pos, ghostDays)
@@ -1597,6 +1645,12 @@ function predictTrajectory(ship, policyType, steps = 900, dtSec = 0.175) {
       }
     }
 
+    // <<< ADDED: predictTrajectory 회피벡터 반영 >>>
+    if (avoidanceVec.lengthSq() > 1e-6) {
+      // avoidance가 목적 방향을 완전히 무너뜨리지 않도록 스케일 조절
+      dir.add(avoidanceVec.normalize().multiplyScalar(Math.min(1.5, avoidanceVec.length())));
+    }
+    
     if (dir.lengthSq() > 1e-6) dir.normalize();
 
     // 거리 기반 추력 비율 (목표와의 거리 기준)
@@ -2132,3 +2186,4 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
+
