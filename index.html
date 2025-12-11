@@ -1223,6 +1223,20 @@ function stepPETS(ship,dt){
     fuelRatio:0.7
   },dt);
 
+  // === [루프 밖에서 사용할 최종 pos 계산] ===
+let finalPosForRisk = obs.pos.clone();
+let finalVelForRisk = obs.vel.clone();
+
+// PETS는 bestDir로 1스텝 예측
+{
+    const g = computeGravitationalAcceleration(finalPosForRisk);
+    finalVelForRisk.addScaledVector(g, dt);
+    finalVelForRisk.addScaledVector(bestDir, ship.maxThrust * 0.5 * dt);
+    finalPosForRisk.addScaledVector(finalVelForRisk, dt);
+}
+
+const risk = computeCollisionRisk(finalPosForRisk);
+
 // =========================================================================
 // === [외부 환경 보상 계산 및 통합] ===
 // PETS는 bestDir를 사용했으므로, jitterPenalty 계산을 위해 baseDir 대신 bestDir를 사용합니다.
@@ -2186,4 +2200,5 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
+
 
