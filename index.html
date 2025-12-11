@@ -1108,7 +1108,7 @@ function getFutureLagrangePointInfo(pos, targetBody, ghostDays) {
 function applyRLAction(ship, action, dt) {
   const dir = action.dir.clone().normalize();
   const thrustOn = !!action.thrustOn;
-  const fuelRatio = Math.max(0,Math.min(1,action.fuelRatio ?? 0.5));
+  const fuelRatio = Math.max(0,Math.min(1,action.fuelRatio ?? 1.0));
   let finalDir = dir.clone().normalize();
   // === [개선 사항: 미세 자세 제어 적용] ===
   // action.pitchYaw는 [-1, 1] 범위의 두 값을 가짐. (Yaw, Pitch)
@@ -2120,6 +2120,7 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
+
 
 
 
