@@ -865,7 +865,7 @@ function spawnSpaceshipSimple(pos, vel, policyType, color) {
     mass: 0.05,
     radius: 0.4,
     fuel: 2.0,
-    maxThrust: 1,
+    maxThrust: 2.0,
     lastFuelUsed:0,
     prevGoalDist:null,
     totalReward:0,
@@ -1242,7 +1242,12 @@ function stepPETS(ship, dt) {
     const timePenalty = 0.8;
     const inverseDistBonus = dist > 0.01 ? (1 / (dist * dist)) * 5000.0 : 0;
     const softCaptureBonus = dist < 10 ? (1 / (1 + velMag)) * 5.0 : 0;
-    const gravSquaredPenalty = gravMag * gravMag * 0.25;
+    const sunDist = obs.pos.length(); // 태양과 거리 (0에 가까우면 위험)
+    if (sunDist < 5) { // 태양 근처 임계 거리
+        thrustRatio = Math.min(1.0, thrustRatio + (5 - sunDist) * 0.1); // 가까울수록 최대 1.0까지 증가
+    }
+    let gravPenaltyFactor = sunDist < 5 ? 0.1 : 0.25;
+    const gravSquaredPenalty = gravMag * gravMag * gravPenaltyFactor;
 
     const lgrgBonus = (obs.lgrgType === 'L4' || obs.lgrgType === 'L5') ? (1 / (1 + obs.lgrgDist)) * 1.5 : 0;
     const ttiPenalty = obs.collisionTTI < 5.0 ? (1 / obs.collisionTTI) * 10.0 : 0;
@@ -2120,6 +2125,7 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
+
 
 
 
