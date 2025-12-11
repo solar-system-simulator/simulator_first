@@ -1242,7 +1242,7 @@ function stepPETS(ship, dt) {
     const timePenalty = 0.8;
     const inverseDistBonus = dist > 0.01 ? (1 / (dist * dist)) * 5000.0 : 0;
     const softCaptureBonus = dist < 10 ? (1 / (1 + velMag)) * 5.0 : 0;
-    const gravSquaredPenalty = gravMag * gravMag * 0.5;
+    const gravSquaredPenalty = gravMag * gravMag;
 
     const lgrgBonus = (obs.lgrgType === 'L4' || obs.lgrgType === 'L5') ? (1 / (1 + obs.lgrgDist)) * 1.5 : 0;
     const ttiPenalty = obs.collisionTTI < 5.0 ? (1 / obs.collisionTTI) * 10.0 : 0;
@@ -2120,6 +2120,7 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
+
 
 
 
