@@ -1354,162 +1354,180 @@ const risk = computeCollisionRisk(finalPosForRisk);
   document.getElementById('petsRew').textContent=ship.totalReward.toFixed(1);
 }
 
-  function stepSAC(ship,dt){
-  const obs = getObservation(ship);
-  if (obs.dist<1 || ship.fuel<=0.01) return;
-  
-  const toTargetDir = obs.toTarget.clone().normalize();
-  const velDir = obs.vel.length()>1e-3 ? obs.vel.clone().normalize() : new THREE.Vector3();
-  const gravDir= obs.grav.length()>1e-4 ? obs.grav.clone().normalize() : new THREE.Vector3();
+function stepPETS(ship, dt) {
+    const obs = getObservation(ship);
+    if (obs.dist < 1 || ship.fuel <= 0.01) return;
 
-  // === [기본 방향 설정] ===
-  let baseDir = new THREE.Vector3()
-    .addScaledVector(toTargetDir, 1.0)
-    .addScaledVector(velDir,    -0.5)
-    .addScaledVector(gravDir,   -0.2);
+    const baseDir = obs.toTarget.clone().normalize();
 
-  // L4/L5 유도
-  if (obs.lgrgDist < 20 && (obs.lgrgType === 'L4' || obs.lgrgType === 'L5') && obs.dist > 15) {
-    const lgrgInfluence = Math.min(1.0, (20 - obs.lgrgDist) / 20) * 0.5;
-    baseDir.addScaledVector(obs.lgrgDir.clone().normalize(), lgrgInfluence);
-  }
-  
-  // 역장/회피/노이즈 보정
-  if (obs.warpInfluence > 0) {
-    baseDir.addScaledVector(obs.warpDir, 0.6 * obs.warpInfluence);
-  }
-  const avoidDir = computeAvoidanceVector(obs.pos);
-  if (avoidDir.lengthSq() > 1e-6) {
-    baseDir.addScaledVector(avoidDir.normalize(), 1.0);
-  }
-  const noise = new THREE.Vector3(
-    (Math.random()-0.5)*0.3, (Math.random()-0.5)*0.2, (Math.random()-0.5)*0.3
-  );
-  baseDir.add(noise.multiplyScalar(0.3));
+    // === L4/L5 유도 ===
+    if (obs.lgrgDist < 20 && (obs.lgrgType === 'L4' || obs.lgrgType === 'L5') && obs.dist > 15) {
+        const lgrgInfluence = Math.min(1.0, (20 - obs.lgrgDist) / 20) * 0.4;
+        baseDir.addScaledVector(obs.lgrgDir.clone().normalize(), lgrgInfluence);
+    }
 
-  baseDir.normalize();
+    // 역장/회피 보정
+    if (obs.warpInfluence > 0) {
+        baseDir.addScaledVector(obs.warpDir, 0.4 * obs.warpInfluence);
+    }
+    const avoidDir = computeAvoidanceVector(obs.pos);
+    if (avoidDir.lengthSq() > 1e-6) {
+        baseDir.addScaledVector(avoidDir.normalize(), 0.8);
+    }
+    baseDir.normalize();
 
-  // === [행동 적용] ===
-  applyRLAction(ship,{
-    thrustOn: obs.dist>1 && ship.fuel>0.02,
-    dir:baseDir,
-    fuelRatio:0.5
-  },dt);
+    let bestScore = -Infinity;
+    let bestDir = baseDir.clone();
+    const horizon = 8, candCount = 16;
 
-// =========================================================================
-// === [외부 환경 보상 계산 및 통합] ===
-// SAC는 baseDir를 사용했으므로, jitterPenalty 계산을 위해 baseDir를 사용합니다.
-// =========================================================================
+    // === PETS 후보 샘플링 및 점수 계산 ===
+    for (let i = 0; i < candCount; i++) {
+        const jitter = new THREE.Vector3(
+            (Math.random() - 0.5) * 0.4,
+            (Math.random() - 0.5) * 0.2,
+            (Math.random() - 0.5) * 0.4
+        );
+        const candDir = baseDir.clone().add(jitter).normalize();
 
-    // 🌟 변수 정의 및 중복 제거
+        let posSim = obs.pos.clone();    // 루프 내 후보 위치
+        let velSim = obs.vel.clone();    // 루프 내 후보 속도
+        let score = 0;
+
+        for (let t = 0; t < horizon; t++) {
+            const g = computeGravitationalAcceleration(posSim);
+            velSim.addScaledVector(g, dt);
+            velSim.addScaledVector(candDir, ship.maxThrust * 0.5 * dt);
+            posSim.addScaledVector(velSim, dt);
+
+            const d = posSim.distanceTo(getRLTargetPos());
+            score -= d * 0.02;
+            score -= g.length() * 1.2;
+
+            // L4/L5 근접 보너스
+            const targetBody = bodies[document.getElementById('autoTarget').value];
+            const lgrg = getNearestLagrangePointInfo(posSim, targetBody);
+            if ((lgrg.type === 'L4' || lgrg.type === 'L5') && lgrg.dist < 15) {
+                score += (15 - lgrg.dist) * 0.1;
+            }
+
+            // 충돌 위험 패널티
+            for (const name in bodies) {
+                const b = bodies[name];
+                const bPos = new THREE.Vector3();
+                if (b.pivot && typeof b.pivot.getWorldPosition === 'function') {
+                    b.pivot.getWorldPosition(bPos);
+                } else if (b.mesh) {
+                    b.mesh.getWorldPosition(bPos);
+                } else continue;
+
+                const bRadius = (b.mesh && b.mesh.geometry && b.mesh.geometry.parameters && b.mesh.geometry.parameters.radius)
+                    ? b.mesh.geometry.parameters.radius
+                    : (b.radius || 1);
+
+                const dd = posSim.distanceTo(bPos);  // 안전하게 posSim 사용
+                if (dd < bRadius * 1.15) {
+                    score -= 1e6 * (1.15 - dd / (bRadius * 1.15));
+                } else if (dd < bRadius * 3.0) {
+                    score -= 500 * (3.0 - dd / (bRadius * 3.0));
+                }
+            }
+        }
+
+        // 충돌 위험도
+        const finalPosSim = posSim.clone();
+        const risk = computeCollisionRisk(finalPosSim);
+        score -= risk * 3;
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestDir.copy(candDir);
+        }
+    }
+
+    // === RL 액션 적용 ===
+    applyRLAction(ship, {
+        thrustOn: obs.dist > 1 && ship.fuel > 0.02,
+        dir: bestDir,
+        fuelRatio: 0.7
+    }, dt);
+
+    // === 루프 밖에서 최종 pos 계산 ===
+    let finalPosForRisk = obs.pos.clone();
+    let finalVelForRisk = obs.vel.clone();
+    {
+        const g = computeGravitationalAcceleration(finalPosForRisk);
+        finalVelForRisk.addScaledVector(g, dt);
+        finalVelForRisk.addScaledVector(bestDir, ship.maxThrust * 0.5 * dt);
+        finalPosForRisk.addScaledVector(finalVelForRisk, dt);
+    }
+    const risk = computeCollisionRisk(finalPosForRisk);
+
+    // === 보상 계산 ===
     const progress = (ship.prevGoalDist ?? obs.dist) - obs.dist;
-    const fuelPenalty = ship.lastFuelUsed; // 누락된 변수 정의
+    const fuelPenalty = ship.lastFuelUsed;
     const dist = obs.dist;
     const velMag = obs.vel.length();
     const gravMag = obs.grav.length();
     const fuelRatio = ship.lastFuelUsed / (ship.maxThrust * dt);
 
-    // B. 떨림 페널티 (baseDir 사용)
-    const lastDir = ship.lastActionDir || new THREE.Vector3(1, 0, 0); 
-    const currentDir = baseDir.clone().normalize(); 
+    const lastDir = ship.lastActionDir || new THREE.Vector3(1, 0, 0);
+    const currentDir = bestDir.clone().normalize();
     const angleRad = lastDir.angleTo(currentDir);
     const jitterPenalty = angleRad * angleRad * 50.0;
-    
-    // A. 효율 보너스
+
     let efficiencyBonus = 0;
-    if (fuelPenalty > 0.001) {
-        efficiencyBonus = (progress / fuelPenalty) * 10.0;
-    } else if (progress > 0) {
-        efficiencyBonus = progress * 15.0; 
-    }
-    const alignmentBonus = obs.targetVelDot * 5.0; // A & D 중복
+    if (fuelPenalty > 0.001) efficiencyBonus = (progress / fuelPenalty) * 10.0;
+    else if (progress > 0) efficiencyBonus = progress * 15.0;
+
+    const alignmentBonus = obs.targetVelDot * 5.0;
     const kineticPenalty = obs.kinetic * 0.005;
     const timePenalty = 0.8;
-
-    // B. 최종 접근 보너스
     let inverseDistBonus = dist > 0.01 ? (1 / (dist * dist)) * 5000.0 : 0;
     let softCaptureBonus = dist < 10 ? (1 / (1 + velMag)) * 5.0 : 0;
     const gravSquaredPenalty = (gravMag * gravMag) * 0.5;
 
-    // C. 전략적 경유지 보상
-    let gaFlybyReward = 0; // obs.gaAvailable 및 gaOpportunity가 정의되었다고 가정
-    /* if (obs.gaAvailable && obs.distToGA < gaOpportunity.flybyRadius * 1.5) { gaFlybyReward = 20.0; } */
-    
+    let gaFlybyReward = 0;
     let lgrgBonus = (obs.lgrgType === 'L4' || obs.lgrgType === 'L5') ? (1 / (1 + obs.lgrgDist)) * 1.5 : 0;
     let ttiPenalty = obs.collisionTTI < 5.0 ? (1 / obs.collisionTTI) * 10.0 : 0;
     const inclinationSquaredPenalty = (obs.pos.y * obs.pos.y) + (obs.vel.y * obs.vel.y);
     const inclinationPenalty = (Math.abs(ship.pos.y) * 0.025) + (Math.abs(ship.vel.y) * 1.5);
 
-    // D. 위험 관리 보상
-    const risk = obs.collisionRisk;
     let safeProgressBonus = progress * 15;
-    if (risk > 0.01) { safeProgressBonus *= (1 / (risk * risk + 1)); } else { safeProgressBonus *= 1.2; }
+    if (risk > 0.01) safeProgressBonus *= 1 / (risk * risk + 1); else safeProgressBonus *= 1.2;
     const escapeBonus = Math.abs(obs.gravVelDot - (-1)) * -1.0 * 2.0;
     const riskSquaredPenalty = (risk * risk) * 30.0;
     let excessiveThrustPenalty = fuelRatio > 0.7 ? (fuelRatio - 0.7) * 10.0 : 0;
-    // 1) 목표 미래 예측 위치 접근 보상
+
     const prevPredDist = ship.prevPredDist ?? obs.predDist;
     const predProgress = prevPredDist - obs.predDist;
     const predictedTargetBonus = predProgress * 20.0;
     ship.prevPredDist = obs.predDist;
 
-    // 2) 목표 행성 속도와의 속도 차이 최소화 보상 (정밀 착륙)
     const velDiff = obs.vel.clone().sub(obs.targetVel).length();
     const velMatchPenalty = velDiff * 2.5;
 
-    // 3) 목표 방향 각도 기반 정렬 보상 (추가 정확도 상승)
-    const angleToTarget = obs.velDirAngle; // obs.toTarget 과 obs.vel 의 각도
+    const angleToTarget = obs.velDirAngle;
     const angleAlignBonus = (Math.PI - angleToTarget) * 3.0;
 
-    // 4) 목표 근처에서 감속 접근 보너스 (스쳐 지나가는 문제 해결)
     let decelApproachBonus = 0;
-    if (dist < 12 && dist > 4) {
-        decelApproachBonus = (1 / (velMag + 0.1)) * 4.0;
-    }
-    
-    // === 🌟🌟🌟 최종 보상 합산 (문법 오류 수정 및 통합) 🌟🌟🌟
-    // 가장 강력한 보상들을 기반으로 합산하고 중복된 기본 페널티 제거
-    ship.totalReward +=
-        // 1. 목표 근접 및 효율
-        efficiencyBonus 
-        + progress * 15 // 기본 근접 보상
-        + alignmentBonus * dt
-        + angleAlignBonus * dt
-        
-        // 2. 최종 접근 및 정밀 제어
-        + inverseDistBonus
-        + softCaptureBonus * dt
-        + predictedTargetBonus
-        + decelApproachBonus * dt
+    if (dist < 12 && dist > 4) decelApproachBonus = (1 / (velMag + 0.1)) * 4.0;
 
-        // 3. 전략적 기동
-        + gaFlybyReward
-        + lgrgBonus * dt
-        
-        // 4. 위험 관리 및 안전
-        + safeProgressBonus 
-        + escapeBonus * dt
-        
-        // 5. 모든 페널티 합산 (감소)
-        - fuelPenalty * 20 
-        - dt * 0.4
-        - kineticPenalty * dt
-        - timePenalty * dt
-        - gravSquaredPenalty * dt
-        - inclinationPenalty * dt
-        - inclinationSquaredPenalty * 0.1 * dt
-        - jitterPenalty * dt
-        - riskSquaredPenalty * dt
-        - excessiveThrustPenalty * dt
-        - ttiPenalty * dt
-        - obs.grav.length() * 4.0 * dt // SAC 고유의 중력 페널티
-        - velMatchPenalty * dt;
+    ship.totalReward +=
+        efficiencyBonus + progress * 15 + alignmentBonus * dt + angleAlignBonus * dt +
+        inverseDistBonus + softCaptureBonus * dt + predictedTargetBonus + decelApproachBonus * dt +
+        gaFlybyReward + lgrgBonus * dt +
+        safeProgressBonus + escapeBonus * dt -
+        fuelPenalty * 20 - dt * 0.4 - kineticPenalty * dt - timePenalty * dt -
+        gravSquaredPenalty * dt - inclinationPenalty * dt - inclinationSquaredPenalty * 0.1 * dt -
+        jitterPenalty * dt - riskSquaredPenalty * dt - excessiveThrustPenalty * dt -
+        velMatchPenalty * dt - ttiPenalty * dt;
 
     ship.prevGoalDist = obs.dist;
 
-  document.getElementById('sacFuel').textContent=(ship.fuel*100).toFixed(1);
-  document.getElementById('sacRew').textContent=ship.totalReward.toFixed(1);
+    document.getElementById('petsFuel').textContent = (ship.fuel * 100).toFixed(1);
+    document.getElementById('petsRew').textContent = ship.totalReward.toFixed(1);
 }
+
 
 // === 예상 궤도 예측 (3D, 움직이는 목표 + 중력 반영) ===
 function predictTrajectory(ship, policyType, steps = 900, dtSec = 0.175) {
@@ -2200,5 +2218,6 @@ focusSel.value='태양'; applyFocus(); radius=200; updateCam();
 </script>
 </body>
 </html>
+
 
 
